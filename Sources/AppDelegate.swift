@@ -4,18 +4,19 @@ import ServiceManagement
 
 // MARK: - App
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate {
     let debugMode = CommandLine.arguments.contains("--debug")
     let testAlertMode = CommandLine.arguments.contains("--test-alert")
     let showStatsMode = CommandLine.arguments.contains("--show-stats")
     let testDashboardMode = CommandLine.arguments.contains("--test-dashboard")
+    let testSettingsMode = CommandLine.arguments.contains("--test-settings")
 
-    var statusItem: NSStatusItem!
     var config = Config()
     var stats = StatsStore()
     var configModDate: Date?
     var statsWindow: NSWindow?
     let island = NotchIslandController()
+    let settingsPanel = SettingsPanelController()
 
     var sessionStart: Date?
     var lastPoll = Date()
@@ -74,12 +75,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loadConfig()
         loadStats()
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
-
-        updateStatusTitle(Date())
+        // 灵动岛：左键看板，右键设置
+        island.onRightClick = { [weak self] in self?.toggleSettings() }
+        updateIsland(Date())
         island.start(enabled: config.islandEnabled)
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.poll() }
 
@@ -100,6 +98,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if testDashboardMode {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                 self.island.toggleDashboard()
+            }
+        }
+        if testSettingsMode {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                self.toggleSettings()
             }
         }
         log("started, baseDir=\(baseDir.path)")
@@ -135,7 +138,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sessionStart = nil
         }
 
-        updateStatusTitle(now)
+        updateIsland(now)
         reloadConfigIfChanged()
 
         if now.timeIntervalSince(lastFlush) > 60 {
@@ -271,31 +274,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         saveConfig()
     }
 
-    // MARK: 菜单栏图标 + 标题（SF Symbols 单色模板图标，自动适配深浅色）
-
-    func updateStatusTitle(_ now: Date) {
-        guard let button = statusItem.button else { return }
-        let unit = L.t("分", "m")
-        let symbol: String
-        let text: String
-        if config.paused {
-            symbol = "pause.circle"
-            text = sessionStart.map { " \(Int(now.timeIntervalSince($0) / 60))\(unit)" } ?? ""
-        } else if let s = sessionStart {
-            symbol = "figure.seated.side"
-            text = " \(Int(now.timeIntervalSince(s) / 60))\(unit)"
-        } else {
-            symbol = "cup.and.saucer"
-            text = ""
-        }
-        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "UsageReminder") {
-            img.isTemplate = true
-            button.image = img
-        }
-        button.title = text
-        button.imagePosition = .imageLeft
-        updateIsland(now)
-    }
+    // MARK: 灵动岛状态刷新
 
     // 把当前状态喂给常驻灵动岛
     func updateIsland(_ now: Date) {
@@ -303,7 +282,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let d = today()
         var icon = "cup.and.saucer"
         var text = ""
-        var tint = Color.teal
+        var tint = Color.white
         var line1 = L.t("当前休息中 ☕️", "Resting ☕️")
 
         if let s = sessionStart {
@@ -311,11 +290,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let mins = Int(cont / 60)
             icon = "figure.seated.side"
             text = " \(mins)\(unit)"
-            tint = mins >= 90 ? .red : (mins >= 45 ? .orange : .teal)
             line1 = L.t("已连续使用 \(fmtDuration(cont))", "Active for \(fmtDuration(cont))")
             if config.paused {
                 icon = "pause.circle"
-                tint = .gray
+                tint = Color(white: 0.55)
                 line1 = L.t("已暂停提醒 ⏸", "Reminders paused ⏸")
             }
         }
@@ -332,147 +310,70 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             line3 = L.t("暂无待提醒事项", "No pending reminders")
         }
-        if sessionStart == nil { icon = "cup.and.saucer"; tint = Color(white: 0.85); text = "" }
+        if sessionStart == nil { icon = "cup.and.saucer"; tint = Color(white: 0.9); text = "" }
 
         island.update(icon: icon, text: text, tint: tint,
                       line1: line1, line2: line2, line3: line3)
     }
 
-    // MARK: 菜单（每次打开时重建，顺便刷新看板数据）
+    // MARK: 设置面板（右键灵动岛打开）
 
-    func menuWillOpen(_ menu: NSMenu) {
-        menu.removeAllItems()
-        let now = Date()
-        let d = today()
-
-        // 当前状态 + 下次提醒倒计时
-        if let s = sessionStart {
-            let cont = now.timeIntervalSince(s)
-            menu.addItem(infoItem(L.t("已连续使用 \(fmtDuration(cont))", "Active for \(fmtDuration(cont))")))
-            if !config.paused, let next = nextReminder(now: now, cont: cont) {
-                menu.addItem(infoItem(next))
-            }
-            if inQuietHours(now) {
-                menu.addItem(infoItem(L.t("免打扰中 🌙", "Quiet hours 🌙")))
-            }
-        } else {
-            menu.addItem(infoItem(L.t("当前休息中 ☕️", "Resting ☕️")))
-        }
-        menu.addItem(.separator())
-
-        // 今日看板
-        let header = NSMenuItem(title: L.t("—— 今日看板 ——", "—— Today ——"), action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
-        menu.addItem(infoItem(L.t("累计使用：\(fmtDuration(d.totalActiveSeconds))", "Total: \(fmtDuration(d.totalActiveSeconds))")))
-        let longest = d.longestSessionSeconds
-        let longestTextZh = longest > 0 ? "（最长 \(fmtDuration(longest))）" : ""
-        let longestTextEn = longest > 0 ? " (longest \(fmtDuration(longest)))" : ""
-        menu.addItem(infoItem(L.t("连续使用：\(d.sessions.count) 段\(longestTextZh)",
-                                  "Sessions: \(d.sessions.count)\(longestTextEn)")))
-        menu.addItem(infoItem(L.t("喝水提醒 \(d.waterReminders) 次 · 站立提醒 \(d.standReminders) 次",
-                                  "Water ×\(d.waterReminders) · Stand ×\(d.standReminders)")))
-        menu.addItem(infoItem(L.t("已完成休息：\(d.breaks) 次", "Breaks taken: \(d.breaks)")))
-
-        let detailItem = NSMenuItem(title: L.t("统计详情…", "View Stats…"), action: #selector(openStats), keyEquivalent: "")
-        detailItem.target = self
-        menu.addItem(detailItem)
-
-        // 近 7 天
-        let weekItem = NSMenuItem(title: L.t("近 7 天", "Last 7 Days"), action: nil, keyEquivalent: "")
-        let weekSub = NSMenu()
-        for line in last7DaysLines() {
-            weekSub.addItem(infoItem(line))
-        }
-        weekItem.submenu = weekSub
-        menu.addItem(weekItem)
-        menu.addItem(.separator())
-
-        // 暂停 / 恢复
-        let pauseItem = NSMenuItem(title: L.t(config.paused ? "恢复提醒" : "暂停提醒",
-                                              config.paused ? "Resume Reminders" : "Pause Reminders"),
-                                   action: #selector(togglePause), keyEquivalent: "")
-        pauseItem.target = self
-        menu.addItem(pauseItem)
-
-        // 灵动岛常驻开关
-        let islandItem = NSMenuItem(title: L.t("灵动岛常驻显示", "Always-on Dynamic Island"), action: #selector(toggleIsland), keyEquivalent: "")
-        islandItem.target = self
-        islandItem.state = config.islandEnabled ? .on : .off
-        menu.addItem(islandItem)
-
-        // 提醒设置
-        let settings = NSMenuItem(title: L.t("提醒设置", "Reminder Settings"), action: nil, keyEquivalent: "")
-        let sub = NSMenu()
-        addOptionGroup(to: sub, title: L.t("喝水提醒", "Water reminder"), options: [30, 45, 60, 90],
-                       current: config.waterReminderMinutes, action: #selector(setWater(_:)), allowOff: true)
-        sub.addItem(.separator())
-        addOptionGroup(to: sub, title: L.t("站立提醒", "Stand reminder"), options: [45, 60, 75, 90],
-                       current: config.standReminderMinutes, action: #selector(setStand(_:)), allowOff: true)
-        sub.addItem(.separator())
-        addOptionGroup(to: sub, title: L.t("重复提醒间隔", "Repeat every"), options: [10, 15, 20, 30],
-                       current: config.repeatReminderMinutes, action: #selector(setRepeat(_:)))
-        sub.addItem(.separator())
-        addOptionGroup(to: sub, title: L.t("休息判定（无操作多久算休息）", "Break threshold (idle time)"), options: [3, 5, 8, 10],
-                       current: config.breakResetMinutes, action: #selector(setBreak(_:)))
-        sub.addItem(.separator())
-        addQuietHoursGroup(to: sub)
-        sub.addItem(.separator())
-        addStyleGroup(to: sub)
-        settings.submenu = sub
-        menu.addItem(settings)
-        menu.addItem(.separator())
-
-        // 开机自启动
-        let loginItem = NSMenuItem(title: L.t("开机自动启动", "Launch at Login"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
-        loginItem.target = self
-        loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(loginItem)
-
-        let openItem = NSMenuItem(title: L.t("打开数据文件夹", "Open Data Folder"), action: #selector(openDataFolder), keyEquivalent: "")
-        openItem.target = self
-        menu.addItem(openItem)
-
-        let quitItem = NSMenuItem(title: L.t("退出", "Quit"), action: #selector(quit), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
-    }
-
-    // 免打扰时段（可多选，独立开关）
-    func addQuietHoursGroup(to menu: NSMenu) {
-        let header = NSMenuItem(title: L.t("   免打扰时段（可多选）", "   Quiet hours (multi-select)"), action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
-        let presets: [(start: Int, end: Int, zh: String, en: String)] = [
-            (12, 14, "午休 12:00–14:00", "Lunch 12:00–14:00"),
-            (18, 22, "晚间 18:00–22:00", "Evening 18:00–22:00"),
-            (22, 8,  "夜间 22:00–08:00", "Night 22:00–08:00")
-        ]
-        for p in presets {
-            let item = NSMenuItem(title: L.t(p.zh, p.en), action: #selector(toggleQuiet(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = p.start * 100 + p.end
-            item.state = config.quietPeriods.contains([p.start, p.end]) ? .on : .off
-            menu.addItem(item)
+    func toggleSettings() {
+        settingsPanel.toggle { [weak self] m in
+            guard let self = self else { return }
+            m.paused = self.config.paused
+            m.launchAtLogin = SMAppService.mainApp.status == .enabled
+            m.islandEnabled = self.config.islandEnabled
+            m.waterMinutes = self.config.waterReminderMinutes
+            m.standMinutes = self.config.standReminderMinutes
+            m.repeatMinutes = self.config.repeatReminderMinutes
+            m.breakMinutes = self.config.breakResetMinutes
+            m.quietPeriods = self.config.quietPeriods
+            m.reminderStyle = self.config.reminderStyle
+            m.onChanged = { self.applySettings(m) }
+            m.onStylePreview = { self.previewReminderStyle() }
+            m.onOpenStats = { self.openStatsWindow() }
+            m.onOpenDataFolder = { NSWorkspace.shared.open(self.baseDir) }
+            m.onQuit = { self.quitApp() }
         }
     }
 
-    // 提醒方式（单选）
-    func addStyleGroup(to menu: NSMenu) {
-        let header = NSMenuItem(title: L.t("   提醒方式", "   Reminder style"), action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
-        let styles: [(ReminderStyle, String, String)] = [
-            (.notch, "灵动岛胶囊（推荐）", "Dynamic Island capsule"),
-            (.strong, "弹窗强提醒", "Modal alert (hard to ignore)"),
-            (.gentle, "普通通知", "Banner notification")
-        ]
-        for (style, zh, en) in styles {
-            let item = NSMenuItem(title: L.t(zh, en), action: #selector(setStyle(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = style.rawValue
-            item.state = (style == config.reminderStyle) ? .on : .off
-            menu.addItem(item)
+    // 设置面板任何字段变化都落到这里
+    func applySettings(_ m: SettingsModel) {
+        config.paused = m.paused
+        config.islandEnabled = m.islandEnabled
+        config.waterReminderMinutes = m.waterMinutes
+        config.standReminderMinutes = m.standMinutes
+        config.repeatReminderMinutes = m.repeatMinutes
+        config.breakResetMinutes = m.breakMinutes
+        config.quietPeriods = m.quietPeriods
+        config.reminderStyle = m.reminderStyle
+        saveConfig()
+
+        island.start(enabled: config.islandEnabled)
+        applyLaunchAtLogin(m.launchAtLogin)
+        updateIsland(Date())
+    }
+
+    func previewReminderStyle() {
+        showReminder(icon: "sparkles",
+                     title: L.t("提醒方式已切换", "Reminder style updated"),
+                     message: L.t("以后提醒会长这样。点一下关闭。", "Future reminders will look like this. Tap to dismiss."),
+                     snoozeKey: nil)
+    }
+
+    func applyLaunchAtLogin(_ enable: Bool) {
+        do {
+            if enable && SMAppService.mainApp.status != .enabled {
+                try SMAppService.mainApp.register()
+            } else if !enable && SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            showStrongAlert(title: L.t("设置失败", "Setup failed"),
+                            message: L.t("无法自动设置开机启动。\n请手动前往：系统设置 → 通用 → 登录项与扩展 → 添加「久坐提醒」。",
+                                         "Couldn't set launch-at-login automatically.\nPlease go to System Settings → General → Login Items and add UsageReminder manually."),
+                            snoozeKey: nil)
         }
     }
 
@@ -488,108 +389,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return L.t("距\(next.0)提醒还有 \(left) 分钟", "\(next.0.capitalized) reminder in \(left)m")
         }
         return nil
-    }
-
-    func last7DaysLines() -> [String] {
-        var lines: [String] = []
-        let cal = Calendar.current
-        for offset in stride(from: 6, through: 0, by: -1) {
-            guard let date = cal.date(byAdding: .day, value: -offset, to: Date()) else { continue }
-            let key = dayFmt.string(from: date)
-            let weekday = weekdayFmt.string(from: date)
-            let day = stats.days[key]
-            let label = offset == 0 ? L.t("今天", "Today") : weekday
-            if let day = day, day.totalActiveSeconds > 0 {
-                lines.append(L.t("\(label)：\(fmtDuration(day.totalActiveSeconds)) · 休息 \(day.breaks) 次",
-                                 "\(label): \(fmtDuration(day.totalActiveSeconds)) · \(day.breaks) breaks"))
-            } else {
-                lines.append(L.t("\(label)：无记录", "\(label): no data"))
-            }
-        }
-        return lines
-    }
-
-    func infoItem(_ title: String) -> NSMenuItem {
-        let item = NSMenuItem(title: "   \(title)", action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        return item
-    }
-
-    func addOptionGroup(to menu: NSMenu, title: String, options: [Int], current: Int, action: Selector, allowOff: Bool = false) {
-        let header = NSMenuItem(title: "   \(title)", action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
-        if allowOff {
-            let off = NSMenuItem(title: L.t("关闭", "Off"), action: action, keyEquivalent: "")
-            off.target = self
-            off.tag = 0
-            off.state = (current == 0) ? .on : .off
-            menu.addItem(off)
-        }
-        for opt in options {
-            let item = NSMenuItem(title: L.t("\(opt) 分钟", "\(opt) min"), action: action, keyEquivalent: "")
-            item.target = self
-            item.tag = opt
-            item.state = (opt == current) ? .on : .off
-            menu.addItem(item)
-        }
-    }
-
-    // MARK: 菜单动作
-
-    @objc func togglePause() {
-        config.paused.toggle()
-        saveConfig()
-        updateStatusTitle(Date())
-    }
-
-    @objc func toggleIsland() {
-        config.islandEnabled.toggle()
-        saveConfig()
-        island.start(enabled: config.islandEnabled)
-        updateStatusTitle(Date())
-    }
-
-    @objc func setStyle(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let style = ReminderStyle(rawValue: raw) else { return }
-        config.reminderStyle = style
-        saveConfig()
-        // 立即预览新样式
-        showReminder(icon: "sparkles",
-                     title: L.t("提醒方式已切换", "Reminder style updated"),
-                     message: L.t("以后提醒会长这样。点一下关闭。", "Future reminders will look like this. Tap to dismiss."),
-                     snoozeKey: nil)
-    }
-
-    @objc func setWater(_ sender: NSMenuItem) { config.waterReminderMinutes = sender.tag; saveConfig() }
-    @objc func setStand(_ sender: NSMenuItem) { config.standReminderMinutes = sender.tag; saveConfig() }
-    @objc func setRepeat(_ sender: NSMenuItem) { config.repeatReminderMinutes = sender.tag; saveConfig() }
-    @objc func setBreak(_ sender: NSMenuItem) { config.breakResetMinutes = sender.tag; saveConfig() }
-
-    @objc func toggleQuiet(_ sender: NSMenuItem) {
-        let period = [sender.tag / 100, sender.tag % 100]
-        if let idx = config.quietPeriods.firstIndex(of: period) {
-            config.quietPeriods.remove(at: idx)
-        } else {
-            config.quietPeriods.append(period)
-        }
-        saveConfig()
-    }
-
-    @objc func toggleLaunchAtLogin() {
-        do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-        } catch {
-            showStrongAlert(title: L.t("设置失败", "Setup failed"),
-                            message: L.t("无法自动设置开机启动。\n请手动前往：系统设置 → 通用 → 登录项与扩展 → 添加「久坐提醒」。",
-                                         "Couldn't set launch-at-login automatically.\nPlease go to System Settings → General → Login Items and add UsageReminder manually."),
-                            snoozeKey: nil)
-        }
     }
 
     @objc func openStats() {
@@ -632,6 +431,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func quit() {
+        quitApp()
+    }
+
+    func quitApp() {
         saveStats()
         NSApplication.shared.terminate(nil)
     }

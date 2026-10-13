@@ -3,7 +3,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
 ![Swift](https://img.shields.io/badge/swift-6-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Release](https://img.shields.io/badge/release-v3.3-brightgreen)
+![Release](https://img.shields.io/badge/release-v0.4-brightgreen)
 
 **[中文文档](README.zh-CN.md)**
 
@@ -18,8 +18,9 @@ No permissions required. No network. No accounts. All data stays in a local JSON
 ## ✨ Features
 
 - **Real activity tracking** — reads the system's HID idle time; sleep and lock screen are handled automatically
-- **Always-on Dynamic Island** — a capsule living under the MacBook notch shows your current session minutes at a glance; the icon heats up teal → orange → red the longer you sit. Tap it to expand a mini dashboard (session, today's total, next reminder countdown)
-- **Reminders expand from the island** — water/stand alerts grow out of the capsule with a spring animation and a close button; also supports modal alert and banner styles, switchable in the menu with instant preview
+- **Always-on Dynamic Island** — a pure-black capsule fused with the MacBook notch (matching shoulder curves, flush top edge, zero extra height). The left ear shows a status icon, the right ear your live session minutes — glance up, no clicks needed
+- **Everything lives in the island** — left-click expands a mini dashboard (session, today, next reminder countdown); right-click opens the full settings panel. No menu-bar icon at all
+- **Reminders expand from the island** — water/stand alerts spring out of the capsule with a close button; modal alert and banner styles also available
 - **Configurable everything** — water reminder (default 45 min), stand reminder (60 min), break threshold (5 min), repeat interval (15 min)
 - **Smart repeat** — if you ignore a reminder and keep sitting, it nags you every 15 minutes until you actually take a break
 - **Multi-slot quiet hours** — lunch-break, evening and overnight presets in any combination (midnight-crossing supported); reminders pause, tracking continues
@@ -33,15 +34,15 @@ No permissions required. No network. No accounts. All data stays in a local JSON
 
 ## 📸 Screenshots
 
-| Dynamic Island (idle) | Island reminder |
-| --- | --- |
-| <img src="docs/images/island-pill.png" width="300"> | <img src="docs/images/island-reminder.png" width="300"> |
+| Dynamic Island (idle) | Island reminder | Settings (right-click) |
+| --- | --- | --- |
+| <img src="docs/images/island-pill.png"> | <img src="docs/images/island-reminder.png" width="300"> | <img src="docs/images/settings-panel.png" width="240"> |
 
-| Stats window | Menu bar (resting) |
-| --- | --- |
-| <img src="docs/images/stats-window.png" width="300"> | <img src="docs/images/menubar.png"> |
+| Stats window |
+| --- |
+| <img src="docs/images/stats-window.png" width="300"> |
 
-Menu bar states: 🪑 seated figure + minutes while working · ☕️ coffee cup while resting · ⏸ when paused.
+Left-click the island for a quick dashboard · right-click for settings.
 
 ## 📦 Install
 
