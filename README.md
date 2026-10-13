@@ -1,45 +1,74 @@
-# 久坐提醒（UsageReminder）
+# UsageReminder · 久坐提醒
 
-一款 macOS 菜单栏小工具：根据你真实的键鼠操作监控连续使用时长，到点强提醒你喝水、站起来活动，并统计每日使用情况。
+![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
+![Swift](https://img.shields.io/badge/swift-6-orange)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Release](https://img.shields.io/badge/release-v3.0-brightgreen)
 
-## 功能
+**[中文文档](README.zh-CN.md)**
 
-- **真实使用监控**：读取系统键鼠空闲时间，无需任何权限；睡眠、锁屏自动暂停
-- **连续计时 + 休息判定**：默认无操作 5 分钟算一次休息，计时归零（可配 3/5/8/10 分钟）
-- **强提醒**：喝水（默认 45 分钟）、站立（默认 60 分钟），弹窗必须手动点掉；不休息则每 15 分钟重复提醒；弹窗上的「不再提醒」可一键关闭该类型
-- **健康小贴士**：每次提醒随机附带一条护眼/拉伸/饮水建议
-- **菜单栏看板**：当前连续时长、下次提醒倒计时、今日累计、连续段数、最长一段、提醒与休息次数、近 7 天概览
-- **统计详情窗口**：近 7 天使用时长柱状图 + 今日明细
-- **开机自动启动**：菜单一键开关
-- **隐私**：全部数据保存在本地 `data/stats.json`，无任何网络请求
+A lightweight macOS menu-bar app that watches your *real* keyboard/mouse activity and reminds you to drink water and stand up — before your back complains.
 
-## 使用
+<p align="center">
+  <img src="docs/images/icon.png" width="128" alt="UsageReminder icon">
+</p>
 
-把 `久坐提醒.app` 拖进「应用程序」文件夹，双击运行。菜单栏出现图标：
+No permissions required. No network. No accounts. All data stays in a local JSON file.
 
-| 状态 | 图标 |
-|---|---|
-| 使用中 | 坐姿小人 + 分钟数 |
-| 休息中 | 咖啡杯 |
-| 已暂停 | 暂停圆圈 |
+## ✨ Features
 
-数据存放在 `~/Library/Application Support/UsageReminder/`（开发模式下则放在 .app 旁边）。配置在菜单里调，也可直接编辑 `config.json`，几秒内自动生效。
+- **Real activity tracking** — reads the system's HID idle time; sleep and lock screen are handled automatically
+- **Strong & gentle reminders** — a modal alert you must dismiss (strong mode), or a plain banner notification (gentle mode); your choice
+- **Configurable everything** — water reminder (default 45 min), stand reminder (60 min), break threshold (5 min), repeat interval (15 min)
+- **Smart repeat** — if you ignore a reminder and keep sitting, it nags you every 15 minutes until you actually take a break
+- **Menu-bar dashboard** — current streak, countdown to next reminder, today's totals, last 7 days at a glance
+- **Stats window** — 7-day bar chart + today's details (SwiftUI Charts)
+- **Health tips** — every reminder ships with a random eye/neck/hydration tip
+- **Bilingual UI** — follows your system language (中文 / English)
+- **Launch at login** — one click in the menu
+- **Universal binary** — Apple Silicon & Intel
 
-## 构建
+## 📸 Screenshots
+
+| Stats window | Menu bar (resting) |
+| --- | --- |
+| <img src="docs/images/stats-window.png" width="320"> | <img src="docs/images/menubar.png"> |
+
+Menu bar states: 🪑 seated figure + minutes while working · ☕️ coffee cup while resting · ⏸ when paused.
+
+## 📦 Install
+
+1. Download `久坐提醒.zip` from [Releases](https://github.com/rainchen88/UsageReminder/releases)
+2. Unzip and drag `久坐提醒.app` into `/Applications`
+3. First launch: **right-click → Open** (the app is not notarized yet)
+4. Requires **macOS 14+**
+
+## 🔧 Build from source
 
 ```bash
-./build.sh   # 产出通用二进制（arm64 + x86_64），需要 Xcode 命令行工具
+git clone https://github.com/rainchen88/UsageReminder.git
+cd UsageReminder
+./build.sh        # produces 久坐提醒.app (universal binary)
 ```
 
-要求 macOS 14 及以上。
+Requires Xcode Command Line Tools (`xcode-select --install`).
 
-## 上架 Mac App Store 待办
+## 🧠 How it works
 
-1. **Apple Developer 账号**（$99/年）
-2. **代码签名 + 公证**：用开发者证书签名；App Store 外分发需 notarize
-3. **沙盒改造**：
-   - 强提醒弹窗目前用 osascript 实现，沙盒下不可用 → 需改用 `UNUserNotificationCenter`（提醒样式让用户在系统设置里选「警告」即可保持强提醒效果）
-   - 数据目录改为 `~/Library/Application Support/UsageReminder/`（沙盒容器内）
-   - HIDIdleTime 读取在沙盒下可用，无需改动
-4. **App Store Connect**：填写元数据、截图（统计窗口 + 菜单栏）、隐私说明（数据不收集、不出本地）
-5. 建议增加英文界面（菜单文案目前为中文）
+- Idle time comes from `IOHIDSystem → HIDIdleTime` (IOKit) — no Accessibility or Input Monitoring permission needed
+- Polls every 5 seconds; idle ≥ break threshold ⇒ break recorded, streak resets
+- Data lives in `~/Library/Application Support/UsageReminder/` (`config.json` + `data/stats.json`)
+- Strong alerts are native AppleScript dialogs; gentle mode uses standard notifications
+
+## 🗺 Roadmap
+
+- [ ] Mac App Store release (sandbox: migrate alerts to `UNUserNotificationCenter`)
+- [ ] Notarized Developer ID build
+- [ ] Weekly/monthly report view
+- [ ] Focus-mode awareness (auto-pause during meetings)
+
+Contributions and issues welcome!
+
+## 📄 License
+
+MIT
