@@ -1,177 +1,6 @@
 import Cocoa
-import IOKit
 import SwiftUI
-import Charts
 import ServiceManagement
-
-// ============================================================
-// 久坐提醒 UsageReminder · 菜单栏小工具 v3
-// 监控连续电脑使用时长，提醒喝水/站立，统计每日使用情况
-// 中英双语界面（跟随系统语言），支持强提醒/温和提醒
-// ============================================================
-
-// MARK: - 本地化
-
-enum L {
-    static let isZh = Locale.current.language.languageCode?.identifier == "zh"
-    static func t(_ zh: String, _ en: String) -> String { isZh ? zh : en }
-}
-
-// MARK: - 配置
-
-struct Config: Codable {
-    var waterReminderMinutes: Int = 45   // 喝水提醒阈值（0 = 关闭）
-    var standReminderMinutes: Int = 60   // 站立提醒阈值（0 = 关闭）
-    var breakResetMinutes: Int = 5       // 无操作多久算「已休息」
-    var repeatReminderMinutes: Int = 15  // 未休息时每隔多久重复提醒
-    var gentleMode: Bool = false         // 温和提醒（普通通知，自动消失）
-    var paused: Bool = false
-}
-
-// MARK: - 统计数据
-
-struct Session: Codable {
-    var start: TimeInterval
-    var end: TimeInterval
-    var seconds: TimeInterval
-}
-
-struct DayStats: Codable {
-    var totalActiveSeconds: TimeInterval = 0
-    var sessions: [Session] = []
-    var waterReminders: Int = 0
-    var standReminders: Int = 0
-    var breaks: Int = 0
-    var longestSessionSeconds: TimeInterval = 0
-}
-
-struct StatsStore: Codable {
-    var days: [String: DayStats] = [:]
-}
-
-// MARK: - 系统空闲时间（无操作秒数，无需任何权限）
-
-func systemIdleSeconds() -> Double {
-    var iterator: io_iterator_t = 0
-    guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOHIDSystem"), &iterator) == KERN_SUCCESS else { return 0 }
-    defer { IOObjectRelease(iterator) }
-    let entry = IOIteratorNext(iterator)
-    guard entry != 0 else { return 0 }
-    defer { IOObjectRelease(entry) }
-    var props: Unmanaged<CFMutableDictionary>?
-    guard IORegistryEntryCreateCFProperties(entry, &props, kCFAllocatorDefault, 0) == KERN_SUCCESS,
-          let dict = props?.takeRetainedValue() as? [String: Any],
-          let idleNs = dict["HIDIdleTime"] as? Int64 else { return 0 }
-    return Double(idleNs) / 1_000_000_000
-}
-
-// MARK: - 工具
-
-func fmtDuration(_ seconds: TimeInterval) -> String {
-    let s = Int(seconds)
-    let h = s / 3600, m = (s % 3600) / 60
-    if L.isZh {
-        return h > 0 ? "\(h) 小时 \(m) 分" : "\(m) 分钟"
-    }
-    return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-}
-
-func esc(_ s: String) -> String {
-    s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-}
-
-// 健康小贴士
-let standTipsZh = [
-    "试试「20-20-20」护眼法则：看向 6 米外的地方，持续 20 秒。",
-    "双手交叉向上举过头顶，深呼吸三次，伸展一下肩颈。",
-    "去接杯水顺便走两步 —— 久坐一小时，下肢血液循环会明显变慢。",
-    "靠墙站 1 分钟，后脑、肩胛、臀部贴墙，让脊柱回归中立位。",
-    "踮踮脚、转转脚踝，各做 20 次，缓解腿部酸胀。"
-]
-let standTipsEn = [
-    "Try the 20-20-20 rule: look at something 6 meters away for 20 seconds.",
-    "Interlace your fingers, stretch overhead, and take three deep breaths.",
-    "Grab a glass of water — sitting for an hour slows blood flow in your legs.",
-    "Stand against a wall for 1 minute to reset your posture.",
-    "Do 20 calf raises and ankle circles to ease leg stiffness."
-]
-let waterTipsZh = [
-    "小口慢饮比大口猛灌更解渴。",
-    "温水最佳，一次 150~200 毫升就好。",
-    "顺手看看窗外，让眼睛也休息 20 秒。"
-]
-let waterTipsEn = [
-    "Sip slowly — it hydrates better than gulping.",
-    "Warm water is best; 150–200 ml at a time.",
-    "Look out the window for 20 seconds to rest your eyes too."
-]
-
-// MARK: - 统计详情窗口（SwiftUI）
-
-struct DayBar: Identifiable {
-    let id = UUID()
-    let label: String
-    let minutes: Double
-    let isToday: Bool
-}
-
-struct StatsView: View {
-    let days: [DayBar]
-    let today: DayStats
-    let currentContinuous: TimeInterval
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Image(systemName: "figure.seated.side")
-                    .font(.title2)
-                    .foregroundStyle(.teal)
-                Text(L.t("使用统计", "Usage Stats"))
-                    .font(.title2).bold()
-                Spacer()
-            }
-
-            Text(L.t("近 7 天累计使用时长", "Screen time · last 7 days"))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Chart(days) { d in
-                BarMark(
-                    x: .value(L.t("日期", "Day"), d.label),
-                    y: .value(L.t("分钟", "Minutes"), d.minutes)
-                )
-                .foregroundStyle(d.isToday ? Color.orange.gradient : Color.teal.gradient)
-                .cornerRadius(4)
-            }
-            .chartYAxisLabel(L.t("分钟", "min"))
-            .frame(height: 180)
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L.t("今日", "Today")).font(.headline)
-                statRow(L.t("累计使用", "Total active"), fmtDuration(today.totalActiveSeconds))
-                statRow(L.t("当前连续", "Current streak"),
-                        currentContinuous > 0 ? fmtDuration(currentContinuous) : L.t("休息中", "Resting"))
-                statRow(L.t("连续使用段", "Sessions"), "\(today.sessions.count)")
-                statRow(L.t("最长一段", "Longest"), fmtDuration(today.longestSessionSeconds))
-                statRow(L.t("喝水 / 站立提醒", "Water / Stand alerts"), "\(today.waterReminders) / \(today.standReminders)")
-                statRow(L.t("已完成休息", "Breaks taken"), "\(today.breaks)")
-            }
-        }
-        .padding(20)
-        .frame(width: 400)
-    }
-
-    func statRow(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).bold()
-        }
-        .font(.callout)
-    }
-}
 
 // MARK: - App
 
@@ -304,7 +133,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             lastFlush = now
         }
         if debugMode {
-            log("idle=\(Int(idle))s continuous=\(sessionStart.map { Int(now.timeIntervalSince($0)) } ?? -1)s total=\(Int(today().totalActiveSeconds))s")
+            log("idle=\(Int(idle))s continuous=\(sessionStart.map { Int(now.timeIntervalSince($0)) } ?? -1)s total=\(Int(today().totalActiveSeconds))s quiet=\(inQuietHours(now))")
         }
     }
 
@@ -318,12 +147,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         stats.days[todayKey()] = d
         saveStats()
         log("session ended: \(Int(secs))s")
+
+        // 久坐后成功休息 → 发个鼓励通知（不打断，自动消失）
+        if secs >= 30 * 60, !config.paused, !inQuietHours(Date()) {
+            showNotification(L.t("干得漂亮 🎉", "Well done 🎉"),
+                             L.t("连续工作 \(fmtDuration(secs)) 后成功休息了一次，身体谢谢你。",
+                                 "You took a real break after \(fmtDuration(secs)) of work. Your body thanks you."))
+        }
     }
 
     // MARK: 提醒
 
+    func inQuietHours(_ now: Date) -> Bool {
+        let s = config.quietHoursStart, e = config.quietHoursEnd
+        guard s >= 0, e >= 0 else { return false }
+        let h = Calendar.current.component(.hour, from: now)
+        return s <= e ? (h >= s && h < e) : (h >= s || h < e)  // 支持跨午夜区间
+    }
+
     func checkReminders(now: Date) {
-        guard !config.paused, let s = sessionStart else { return }
+        guard !config.paused, !inQuietHours(now), let s = sessionStart else { return }
         let cont = now.timeIntervalSince(s)
         let repeatSecs = TimeInterval(config.repeatReminderMinutes * 60)
 
@@ -356,18 +199,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    // 温和通知（自动消失，不打断）
+    func showNotification(_ title: String, _ message: String) {
+        let script = "display notification \"\(esc(message))\" with title \"\(esc(title))\" sound name \"Glass\""
+        DispatchQueue.global().async {
+            let p = Process()
+            p.launchPath = "/usr/bin/osascript"
+            p.arguments = ["-e", script]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            p.launch()
+        }
+    }
+
     // 提醒：温和模式用系统通知（自动消失），否则强提醒弹窗（必须手动点掉）
     func showAlert(title: String, message: String, onSnooze: (() -> Void)? = nil) {
         if config.gentleMode {
-            let script = "display notification \"\(esc(message))\" with title \"\(esc(title))\" sound name \"Glass\""
-            DispatchQueue.global().async {
-                let p = Process()
-                p.launchPath = "/usr/bin/osascript"
-                p.arguments = ["-e", script]
-                p.standardOutput = FileHandle.nullDevice
-                p.standardError = FileHandle.nullDevice
-                p.launch()
-            }
+            showNotification(title, message)
             return
         }
         guard !alertShowing else { return }
@@ -432,6 +280,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !config.paused, let next = nextReminder(now: now, cont: cont) {
                 menu.addItem(infoItem(next))
             }
+            if inQuietHours(now) {
+                menu.addItem(infoItem(L.t("免打扰中 🌙", "Quiet hours 🌙")))
+            }
         } else {
             menu.addItem(infoItem(L.t("当前休息中 ☕️", "Resting ☕️")))
         }
@@ -487,6 +338,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         addOptionGroup(to: sub, title: L.t("休息判定（无操作多久算休息）", "Break threshold (idle time)"), options: [3, 5, 8, 10],
                        current: config.breakResetMinutes, action: #selector(setBreak(_:)))
         sub.addItem(.separator())
+        addQuietHoursGroup(to: sub)
+        sub.addItem(.separator())
         let gentleItem = NSMenuItem(title: L.t("温和提醒（通知不挡屏幕）", "Gentle mode (banner notifications)"),
                                     action: #selector(toggleGentle), keyEquivalent: "")
         gentleItem.target = self
@@ -509,6 +362,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let quitItem = NSMenuItem(title: L.t("退出", "Quit"), action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
+    }
+
+    // 免打扰时段预设：tag 0=关闭 1=午休 2=夜间
+    func addQuietHoursGroup(to menu: NSMenu) {
+        let header = NSMenuItem(title: L.t("   免打扰时段", "   Quiet hours"), action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        let current: Int
+        if config.quietHoursStart == 12 && config.quietHoursEnd == 14 { current = 1 }
+        else if config.quietHoursStart == 22 && config.quietHoursEnd == 8 { current = 2 }
+        else { current = 0 }
+        let presets: [(Int, String, String)] = [
+            (0, "关闭", "Off"),
+            (1, "午休 12:00–14:00", "Lunch 12:00–14:00"),
+            (2, "夜间 22:00–08:00", "Night 22:00–08:00")
+        ]
+        for (tag, zh, en) in presets {
+            let item = NSMenuItem(title: L.t(zh, en), action: #selector(setQuiet(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = tag
+            item.state = (tag == current) ? .on : .off
+            menu.addItem(item)
+        }
     }
 
     // 下一个提醒的倒计时文案
@@ -588,6 +464,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func setRepeat(_ sender: NSMenuItem) { config.repeatReminderMinutes = sender.tag; saveConfig() }
     @objc func setBreak(_ sender: NSMenuItem) { config.breakResetMinutes = sender.tag; saveConfig() }
 
+    @objc func setQuiet(_ sender: NSMenuItem) {
+        switch sender.tag {
+        case 1: config.quietHoursStart = 12; config.quietHoursEnd = 14
+        case 2: config.quietHoursStart = 22; config.quietHoursEnd = 8
+        default: config.quietHoursStart = -1; config.quietHoursEnd = -1
+        }
+        saveConfig()
+    }
+
     @objc func toggleLaunchAtLogin() {
         do {
             if SMAppService.mainApp.status == .enabled {
@@ -611,17 +496,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let now = Date()
         let cal = Calendar.current
         var bars: [DayBar] = []
+        var weekTotal: TimeInterval = 0
         for offset in stride(from: 6, through: 0, by: -1) {
             guard let date = cal.date(byAdding: .day, value: -offset, to: now) else { continue }
             let key = dayFmt.string(from: date)
             let day = stats.days[key]
             let label = offset == 0 ? L.t("今天", "Today") : weekdayFmt.string(from: date)
-            bars.append(DayBar(label: label,
-                               minutes: (day?.totalActiveSeconds ?? 0) / 60,
-                               isToday: offset == 0))
+            let secs = day?.totalActiveSeconds ?? 0
+            weekTotal += secs
+            bars.append(DayBar(label: label, minutes: secs / 60, isToday: offset == 0))
         }
         let cont = sessionStart.map { now.timeIntervalSince($0) } ?? 0
-        let view = StatsView(days: bars, today: today(), currentContinuous: cont)
+        let view = StatsView(days: bars, today: today(), currentContinuous: cont, weekTotal: weekTotal)
 
         let win = NSWindow(contentViewController: NSHostingController(rootView: view))
         win.title = L.t("久坐提醒 · 使用统计", "UsageReminder · Stats")
@@ -691,11 +577,3 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if debugMode { FileHandle.standardOutput.write("[\(Date())] \(msg)\n".data(using: .utf8)!) }
     }
 }
-
-// MARK: - 入口
-
-let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()

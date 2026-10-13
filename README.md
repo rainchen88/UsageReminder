@@ -21,6 +21,8 @@ No permissions required. No network. No accounts. All data stays in a local JSON
 - **Strong & gentle reminders** — a modal alert you must dismiss (strong mode), or a plain banner notification (gentle mode); your choice
 - **Configurable everything** — water reminder (default 45 min), stand reminder (60 min), break threshold (5 min), repeat interval (15 min)
 - **Smart repeat** — if you ignore a reminder and keep sitting, it nags you every 15 minutes until you actually take a break
+- **Quiet hours** — lunch-break and overnight presets; reminders pause, tracking continues
+- **Positive reinforcement** — a cheerful notification when you actually take that break
 - **Menu-bar dashboard** — current streak, countdown to next reminder, today's totals, last 7 days at a glance
 - **Stats window** — 7-day bar chart + today's details (SwiftUI Charts)
 - **Health tips** — every reminder ships with a random eye/neck/hydration tip

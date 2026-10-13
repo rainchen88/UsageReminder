@@ -16,11 +16,11 @@ cp Assets/AppIcon-trimmed.png Assets/AppIcon.iconset/icon_512x512@2x.png
 iconutil -c icns Assets/AppIcon.iconset -o Assets/AppIcon.icns
 
 echo "编译 arm64..."
-swiftc -O -swift-version 5 -target arm64-apple-macos14.0 main.swift \
+swiftc -O -swift-version 5 -target arm64-apple-macos14.0 Sources/*.swift \
   -o /tmp/UsageReminder-arm64 -framework Cocoa -framework IOKit
 
 echo "编译 x86_64..."
-swiftc -O -swift-version 5 -target x86_64-apple-macos14.0 main.swift \
+swiftc -O -swift-version 5 -target x86_64-apple-macos14.0 Sources/*.swift \
   -o /tmp/UsageReminder-x86_64 -framework Cocoa -framework IOKit
 
 echo "合并通用二进制并打包..."

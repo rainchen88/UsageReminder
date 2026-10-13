@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.1 · 2026-10-13
+
+- 新增免打扰时段（午休 / 夜间预设，支持跨午夜）/ Quiet hours presets (lunch break, overnight)
+- 久坐后成功休息会收到鼓励通知 / Praise notification after taking a real break
+- 统计窗口新增近 7 天总计与日均 / Weekly total & daily average in stats window
+- 修复旧版本配置升级时被重置的问题 / Fix config reset on upgrade (backward-compatible decoding)
+- 代码拆分为多文件结构 / Codebase split into multiple source files
+
 ## v3.0 · 2026-10-13
 
 - 中英双语界面，自动跟随系统语言 / Bilingual UI (中文 & English, follows system language)
