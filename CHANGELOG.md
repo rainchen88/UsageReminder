@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.3 · 2026-10-13
+
+- 灵动岛常驻：刘海下方胶囊实时显示连续使用时长，久坐升温变色（青→橙→红）/ Always-on Dynamic Island capsule under the notch showing live session minutes, heating up teal → orange → red
+- 点击胶囊展开小看板：当前时长、今日累计、下次提醒倒计时，8 秒自动收起 / Tap the capsule to expand a mini dashboard (session, today, next reminder countdown), auto-collapses
+- 提醒从灵动岛展开并新增关闭按钮；25 秒未确认自动收起 / Reminders expand from the island with a close button; auto-dismiss after 25s
+- 胶囊背景改为实色，任意壁纸/窗口下文字都清晰 / Solid capsule background for readability over any content
+- 新增「灵动岛常驻显示」开关 / New "always-on island" toggle in the menu
+- 修复胶囊窗口塌缩为 0×0 的问题（改用 NSHostingView + 显式 frame）/ Fix capsule collapsing to 0×0 (NSHostingView with explicit frame)
+
 ## v3.2 · 2026-10-13
 
 - 灵动岛胶囊提醒（默认）：贴着刘海/屏幕顶部滑出的黑色胶囊，一键关闭，不打断输入 / Dynamic-Island-style notch capsule reminder (default): a black capsule sliding down under the notch, one-click dismiss, no keyboard focus stolen

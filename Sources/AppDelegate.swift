@@ -8,13 +8,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let debugMode = CommandLine.arguments.contains("--debug")
     let testAlertMode = CommandLine.arguments.contains("--test-alert")
     let showStatsMode = CommandLine.arguments.contains("--show-stats")
+    let testDashboardMode = CommandLine.arguments.contains("--test-dashboard")
 
     var statusItem: NSStatusItem!
     var config = Config()
     var stats = StatsStore()
     var configModDate: Date?
     var statsWindow: NSWindow?
-    let notchReminder = NotchReminderController()
+    let island = NotchIslandController()
 
     var sessionStart: Date?
     var lastPoll = Date()
@@ -79,6 +80,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
 
         updateStatusTitle(Date())
+        island.start(enabled: config.islandEnabled)
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.poll() }
 
         if testAlertMode {
@@ -93,6 +95,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if showStatsMode {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 self.openStatsWindow()
+            }
+        }
+        if testDashboardMode {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                self.island.toggleDashboard()
             }
         }
         log("started, baseDir=\(baseDir.path)")
@@ -213,7 +220,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSSound.beep()
         switch config.reminderStyle {
         case .notch:
-            notchReminder.show(icon: icon, title: title, message: message) { /* 点按即确认 */ }
+            island.showReminder(icon: icon, title: title, message: message) { /* 点按即确认 */ }
         case .gentle:
             showNotification(title, message)
         case .strong:
@@ -287,6 +294,48 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         button.title = text
         button.imagePosition = .imageLeft
+        updateIsland(now)
+    }
+
+    // 把当前状态喂给常驻灵动岛
+    func updateIsland(_ now: Date) {
+        let unit = L.t("分", "m")
+        let d = today()
+        var icon = "cup.and.saucer"
+        var text = ""
+        var tint = Color.teal
+        var line1 = L.t("当前休息中 ☕️", "Resting ☕️")
+
+        if let s = sessionStart {
+            let cont = now.timeIntervalSince(s)
+            let mins = Int(cont / 60)
+            icon = "figure.seated.side"
+            text = " \(mins)\(unit)"
+            tint = mins >= 90 ? .red : (mins >= 45 ? .orange : .teal)
+            line1 = L.t("已连续使用 \(fmtDuration(cont))", "Active for \(fmtDuration(cont))")
+            if config.paused {
+                icon = "pause.circle"
+                tint = .gray
+                line1 = L.t("已暂停提醒 ⏸", "Reminders paused ⏸")
+            }
+        }
+
+        let line2 = L.t("今日累计 \(fmtDuration(d.totalActiveSeconds)) · 休息 \(d.breaks) 次",
+                        "Today \(fmtDuration(d.totalActiveSeconds)) · \(d.breaks) breaks")
+        var line3 = ""
+        if inQuietHours(now) {
+            line3 = L.t("免打扰中 🌙", "Quiet hours 🌙")
+        } else if config.paused {
+            line3 = L.t("提醒已暂停", "Reminders paused")
+        } else if let s = sessionStart, let next = nextReminder(now: now, cont: now.timeIntervalSince(s)) {
+            line3 = next
+        } else {
+            line3 = L.t("暂无待提醒事项", "No pending reminders")
+        }
+        if sessionStart == nil { icon = "cup.and.saucer"; tint = .teal; text = "" }
+
+        island.update(icon: icon, text: text, tint: tint,
+                      line1: line1, line2: line2, line3: line3)
     }
 
     // MARK: 菜单（每次打开时重建，顺便刷新看板数据）
@@ -345,6 +394,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                    action: #selector(togglePause), keyEquivalent: "")
         pauseItem.target = self
         menu.addItem(pauseItem)
+
+        // 灵动岛常驻开关
+        let islandItem = NSMenuItem(title: L.t("灵动岛常驻显示", "Always-on Dynamic Island"), action: #selector(toggleIsland), keyEquivalent: "")
+        islandItem.target = self
+        islandItem.state = config.islandEnabled ? .on : .off
+        menu.addItem(islandItem)
 
         // 提醒设置
         let settings = NSMenuItem(title: L.t("提醒设置", "Reminder Settings"), action: nil, keyEquivalent: "")
@@ -485,6 +540,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func togglePause() {
         config.paused.toggle()
         saveConfig()
+        updateStatusTitle(Date())
+    }
+
+    @objc func toggleIsland() {
+        config.islandEnabled.toggle()
+        saveConfig()
+        island.start(enabled: config.islandEnabled)
         updateStatusTitle(Date())
     }
 

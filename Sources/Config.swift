@@ -21,6 +21,7 @@ struct Config: Codable {
     var repeatReminderMinutes: Int = 15  // 未休息时每隔多久重复提醒
     var quietPeriods: [[Int]] = []       // 免打扰时段列表，如 [[12,14],[22,8]]，支持多选
     var reminderStyle: ReminderStyle = .notch
+    var islandEnabled: Bool = true       // 灵动岛胶囊常驻显示
     var paused: Bool = false
 
     init() {}
@@ -28,7 +29,7 @@ struct Config: Codable {
     // 向后兼容：旧字段 gentleMode / quietHoursStart/End 自动迁移，缺失字段用默认值
     enum CodingKeys: String, CodingKey {
         case waterReminderMinutes, standReminderMinutes, breakResetMinutes
-        case repeatReminderMinutes, quietPeriods, reminderStyle, paused
+        case repeatReminderMinutes, quietPeriods, reminderStyle, islandEnabled, paused
         case gentleMode, quietHoursStart, quietHoursEnd   // 仅用于读取旧配置
     }
 
@@ -39,6 +40,7 @@ struct Config: Codable {
         breakResetMinutes = try c.decodeIfPresent(Int.self, forKey: .breakResetMinutes) ?? 5
         repeatReminderMinutes = try c.decodeIfPresent(Int.self, forKey: .repeatReminderMinutes) ?? 15
         paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? false
+        islandEnabled = try c.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
 
         if let style = try c.decodeIfPresent(ReminderStyle.self, forKey: .reminderStyle) {
             reminderStyle = style
@@ -63,6 +65,7 @@ struct Config: Codable {
         try c.encode(repeatReminderMinutes, forKey: .repeatReminderMinutes)
         try c.encode(quietPeriods, forKey: .quietPeriods)
         try c.encode(reminderStyle, forKey: .reminderStyle)
+        try c.encode(islandEnabled, forKey: .islandEnabled)
         try c.encode(paused, forKey: .paused)
     }
 }

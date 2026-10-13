@@ -9,7 +9,8 @@
 ## ✨ 功能
 
 - **真实使用监控**：读取系统键鼠空闲时间，无需任何权限；睡眠、锁屏自动暂停
-- **提醒方式三选一**：灵动岛胶囊（默认，贴刘海滑出、不抢焦点、一键关闭）/ 强提醒弹窗 / 温和通知，菜单切换立即预览
+- **灵动岛常驻**：刘海下方常驻一颗黑色胶囊，实时显示已连续使用分钟数，久坐越久图标颜色越「升温」（青→橙→红）；点一下胶囊展开小看板（当前时长 / 今日累计 / 下次提醒倒计时）
+- **提醒从灵动岛展开**：喝水/站立提醒从大胶囊里弹出来，带关闭按钮，一键确认；也可切换强提醒弹窗 / 温和通知
 - **全部可配置**：喝水（默认 45 分钟）、站立（60 分钟）、休息判定（5 分钟）、重复提醒（15 分钟）
 - **智能重复**：提醒了你还坐着不动？每 15 分钟再催一次，直到你真正休息
 - **免打扰多选时段**：午休 / 晚间 / 夜间任意组合，支持跨午夜，提醒暂停但计时继续
@@ -23,9 +24,13 @@
 
 ## 📸 截图
 
-| 统计窗口 | 菜单栏（休息状态） | 灵动岛胶囊提醒 |
-| --- | --- | --- |
-| <img src="docs/images/stats-window.png" width="300"> | <img src="docs/images/menubar.png"> | <img src="docs/images/notch-reminder.png" width="300"> |
+| 灵动岛（休息中） | 灵动岛提醒 |
+| --- | --- |
+| <img src="docs/images/island-pill.png" width="300"> | <img src="docs/images/island-reminder.png" width="300"> |
+
+| 统计窗口 | 菜单栏（休息状态） |
+| --- | --- |
+| <img src="docs/images/stats-window.png" width="300"> | <img src="docs/images/menubar.png"> |
 
 菜单栏图标：使用中 = 坐姿小人 + 分钟数 · 休息中 = 咖啡杯 · 暂停 = 暂停圆圈。
 
@@ -51,7 +56,7 @@ cd UsageReminder
 - 空闲时间来自 `IOHIDSystem → HIDIdleTime`（IOKit），不需要辅助功能/输入监控权限
 - 每 5 秒轮询一次；无操作超过休息判定阈值 ⇒ 记一次休息，连续计时归零
 - 数据存放在 `~/Library/Application Support/UsageReminder/`（`config.json` + `data/stats.json`）
-- 强提醒是原生 AppleScript 对话框；温和模式走系统通知；灵动岛胶囊是贴在刘海下方的无边框 NSPanel
+- 灵动岛是钉在屏幕顶部中央的无边框 NSPanel；强提醒是原生 AppleScript 对话框；温和模式走系统通知
 
 ## 🗺  roadmap
 
