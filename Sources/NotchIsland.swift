@@ -2,6 +2,10 @@ import Cocoa
 import SwiftUI
 
 // MARK: - 常驻灵动岛（刘海胶囊）
+// 设计要点（与物理刘海融为一体）：
+//   · 顶边贴屏幕顶、比刘海更宽更高，超出刘海的部分自然「露出来」
+//   · 纯黑背景（与刘海硬件同色），只有底部两个圆角，顶部直角
+//   · 内容放在刘海下沿以下的可见区域（safeAreaInsets.top ≈ 38pt）
 // 三种形态：
 //   pill      胶囊常驻：图标 + 连续使用分钟数，颜色随久坐时长升温（青→橙→红）
 //   dashboard 点击胶囊展开：连续时长 / 今日累计 / 下次提醒倒计时，8 秒自动收起
@@ -22,69 +26,52 @@ class IslandModel: ObservableObject {
     @Published var line1 = ""
     @Published var line2 = ""
     @Published var line3 = ""
-    @Published var isReminder = false
 
     var onAcknowledge: (() -> Void)?
     var onTapPill: () -> Void = {}
     var onDismissReminder: () -> Void = {}
 
+    // 刘海下沿深度（内容区从这里开始）
+    var notchDepth: CGFloat = 38
+
     var size: NSSize {
         switch mode {
-        case .pill:      return NSSize(width: 150, height: 34)
-        case .dashboard: return NSSize(width: 340, height: 148)
-        case .reminder:  return NSSize(width: 430, height: 108)
+        case .pill:      return NSSize(width: 240, height: notchDepth + 26)
+        case .dashboard: return NSSize(width: 400, height: notchDepth + 138)
+        case .reminder:  return NSSize(width: 480, height: notchDepth + 102)
         }
     }
-    var cornerRadius: CGFloat { mode == .pill ? 17 : 24 }
+    var bottomRadius: CGFloat { mode == .pill ? 14 : 22 }
 }
 
 struct IslandView: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            // 内容
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)   // 上半部分藏在物理刘海后面
+            // 可见内容区（刘海下沿以下）
             Group {
                 switch model.mode {
-                case .pill:
-                    pillContent
-                case .dashboard:
-                    dashboardContent
-                case .reminder:
-                    reminderContent
+                case .pill:      pillContent
+                case .dashboard: dashboardContent
+                case .reminder:  reminderContent
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            // 提醒态的关闭按钮
-            if model.mode == .reminder {
-                Button(action: { model.onDismissReminder() }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(.white.opacity(0.55))
-                }
-                .buttonStyle(.plain)
-                .padding(10)
             }
         }
         .frame(width: model.size.width, height: model.size.height)
-        .background(Color(white: 0.07))
-        .clipShape(RoundedRectangle(cornerRadius: model.cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: model.cornerRadius, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if model.mode == .pill { model.onTapPill() }
-        }
+        .background(Color.black)
+        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: model.bottomRadius,
+                                          bottomTrailingRadius: model.bottomRadius,
+                                          style: .continuous))
+        .shadow(color: .black.opacity(0.45), radius: 14, x: 0, y: 8)
     }
 
     // 胶囊：图标 + 分钟数
     var pillContent: some View {
         HStack(spacing: 7) {
             Image(systemName: model.pillIcon)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(model.pillTint)
             if !model.pillText.isEmpty {
                 Text(model.pillText)
@@ -92,6 +79,10 @@ struct IslandView: View {
                     .foregroundStyle(.white)
             }
         }
+        .frame(height: 26)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { model.onTapPill() }
     }
 
     // 看板：连续时长 / 今日累计 / 下次提醒
@@ -112,15 +103,17 @@ struct IslandView: View {
             Text(model.line3)
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.75))
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 20)
+        .padding(.top, 6)
+        .padding(.bottom, 16)
+        .frame(height: 138)
+        .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { model.onTapPill() }   // 再点一下收起
     }
 
-    // 提醒：图标 + 标题 + 文案
+    // 提醒：图标 + 标题 + 文案 + 关闭按钮
     var reminderContent: some View {
         HStack(spacing: 12) {
             Image(systemName: model.bigIcon)
@@ -137,10 +130,18 @@ struct IslandView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
+            Button(action: { model.onDismissReminder() }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .padding(.trailing, 20)   // 给关闭按钮留位
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
+        .padding(.bottom, 14)
+        .frame(height: 102)
+        .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { model.onDismissReminder() }   // 点按也算确认
     }
@@ -177,6 +178,10 @@ class NotchIslandController {
 
     private func ensurePanel() {
         if panel != nil { return }
+        // 用目标屏幕的真实刘海深度
+        if let screen = targetScreen(), screen.safeAreaInsets.top > 0 {
+            model.notchDepth = screen.safeAreaInsets.top
+        }
         let size = model.size
         let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                             styleMask: [.borderless, .nonactivatingPanel],
@@ -188,7 +193,7 @@ class NotchIslandController {
         panel.contentView = hosting
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false
+        panel.hasShadow = false   // 阴影由 SwiftUI 侧绘制，避免方角阴影穿帮
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         panel.isReleasedWhenClosed = false
@@ -207,7 +212,7 @@ class NotchIslandController {
     private func frameFor(size: NSSize) -> NSRect {
         guard let screen = targetScreen() else { return NSRect(origin: .zero, size: size) }
         let x = screen.frame.midX - size.width / 2
-        let y = screen.frame.maxY - size.height   // 顶边对齐屏幕顶，与刘海融为一体
+        let y = screen.frame.maxY - size.height   // 顶边贴死屏幕顶，与刘海融为一体
         return NSRect(x: x, y: y, width: size.width, height: size.height)
     }
 
@@ -233,19 +238,10 @@ class NotchIslandController {
         model.pillIcon = icon
         model.pillText = text
         model.pillTint = tint
-        // 看板展开时同步刷新内容
-        if model.mode == .dashboard {
-            model.bigIcon = icon
-            model.line1 = line1
-            model.line2 = line2
-            model.line3 = line3
-        } else {
-            // 缓存起来，下次展开直接用
-            model.bigIcon = icon
-            model.line1 = line1
-            model.line2 = line2
-            model.line3 = line3
-        }
+        model.bigIcon = icon
+        model.line1 = line1
+        model.line2 = line2
+        model.line3 = line3
     }
 
     // MARK: 看板展开 / 收起

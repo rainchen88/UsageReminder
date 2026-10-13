@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.3.1 · 2026-10-13
+
+- 灵动岛与物理刘海融为一体：顶边贴死屏幕顶、纯黑、仅底部圆角、带柔和投影，内容显示在刘海下沿的可见区域 / Island now merges with the physical notch: flush top, pure black, bottom-only rounded corners, soft shadow; content sits below the notch edge
+- 修复胶囊被物理刘海遮挡看不见的问题 / Fix capsule being hidden behind the physical notch
+
 ## v3.3 · 2026-10-13
 
 - 灵动岛常驻：刘海下方胶囊实时显示连续使用时长，久坐升温变色（青→橙→红）/ Always-on Dynamic Island capsule under the notch showing live session minutes, heating up teal → orange → red
