@@ -332,7 +332,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             line3 = L.t("暂无待提醒事项", "No pending reminders")
         }
-        if sessionStart == nil { icon = "cup.and.saucer"; tint = .teal; text = "" }
+        if sessionStart == nil { icon = "cup.and.saucer"; tint = Color(white: 0.85); text = "" }
 
         island.update(icon: icon, text: text, tint: tint,
                       line1: line1, line2: line2, line3: line3)

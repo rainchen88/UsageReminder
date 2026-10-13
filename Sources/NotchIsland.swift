@@ -31,17 +31,17 @@ class IslandModel: ObservableObject {
     var onTapPill: () -> Void = {}
     var onDismissReminder: () -> Void = {}
 
-    // 刘海下沿深度（内容区从这里开始）
+    // 刘海下沿深度（胶囊高度与刘海齐平，不往下凸）
     var notchDepth: CGFloat = 38
 
     var size: NSSize {
         switch mode {
-        case .pill:      return NSSize(width: 240, height: notchDepth + 26)
-        case .dashboard: return NSSize(width: 400, height: notchDepth + 138)
-        case .reminder:  return NSSize(width: 480, height: notchDepth + 102)
+        case .pill:      return NSSize(width: 340, height: notchDepth)          // 与刘海同高，内容在两侧耳朵
+        case .dashboard: return NSSize(width: 400, height: notchDepth + 122)
+        case .reminder:  return NSSize(width: 440, height: notchDepth + 96)
         }
     }
-    var bottomRadius: CGFloat { mode == .pill ? 14 : 22 }
+    var bottomRadius: CGFloat { mode == .pill ? 10 : 20 }
 }
 
 struct IslandView: View {
@@ -64,23 +64,24 @@ struct IslandView: View {
         .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: model.bottomRadius,
                                           bottomTrailingRadius: model.bottomRadius,
                                           style: .continuous))
-        .shadow(color: .black.opacity(0.45), radius: 14, x: 0, y: 8)
+        .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 4)
     }
 
-    // 胶囊：图标 + 分钟数
+    // 胶囊：左耳朵图标 + 右耳朵分钟数（中间被物理刘海挡住，正好空着）
     var pillContent: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 0) {
             Image(systemName: model.pillIcon)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(model.pillTint)
+            Spacer(minLength: 0)
             if !model.pillText.isEmpty {
                 Text(model.pillText)
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
                     .foregroundStyle(.white)
             }
         }
-        .frame(height: 26)
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 22)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { model.onTapPill() }
     }
@@ -106,8 +107,8 @@ struct IslandView: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 6)
-        .padding(.bottom, 16)
-        .frame(height: 138)
+        .padding(.bottom, 14)
+        .frame(height: 122)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { model.onTapPill() }   // 再点一下收起
@@ -139,8 +140,8 @@ struct IslandView: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 4)
-        .padding(.bottom, 14)
-        .frame(height: 102)
+        .padding(.bottom, 12)
+        .frame(height: 96)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { model.onDismissReminder() }   // 点按也算确认

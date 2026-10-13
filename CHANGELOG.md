@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.3.2 · 2026-10-13
+
+- 灵动岛改为与刘海同高，不再向下凸出遮挡程序界面；内容放在刘海两侧的「耳朵」上：左耳图标、右耳分钟数 / Island is now flush with the notch height and no longer covers app content; icon on the left ear, minutes on the right ear
+- 休息状态图标改为低调的白色 / Resting icon now understated white
+- 展开动画与圆角更贴合刘海曲线 / Expansion corners and animation tuned to match the notch
+
 ## v3.3.1 · 2026-10-13
 
 - 灵动岛与物理刘海融为一体：顶边贴死屏幕顶、纯黑、仅底部圆角、带柔和投影，内容显示在刘海下沿的可见区域 / Island now merges with the physical notch: flush top, pure black, bottom-only rounded corners, soft shadow; content sits below the notch edge
