@@ -3,7 +3,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
 ![Swift](https://img.shields.io/badge/swift-6-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Release](https://img.shields.io/badge/release-v3.0-brightgreen)
+![Release](https://img.shields.io/badge/release-v3.2-brightgreen)
 
 **[中文文档](README.zh-CN.md)**
 
@@ -18,10 +18,10 @@ No permissions required. No network. No accounts. All data stays in a local JSON
 ## ✨ Features
 
 - **Real activity tracking** — reads the system's HID idle time; sleep and lock screen are handled automatically
-- **Strong & gentle reminders** — a modal alert you must dismiss (strong mode), or a plain banner notification (gentle mode); your choice
+- **Three reminder styles** — Dynamic-Island-style notch capsule (default), a modal alert you must dismiss, or a plain auto-dismissing banner; switch in the menu with instant preview
 - **Configurable everything** — water reminder (default 45 min), stand reminder (60 min), break threshold (5 min), repeat interval (15 min)
 - **Smart repeat** — if you ignore a reminder and keep sitting, it nags you every 15 minutes until you actually take a break
-- **Quiet hours** — lunch-break and overnight presets; reminders pause, tracking continues
+- **Multi-slot quiet hours** — lunch-break, evening and overnight presets in any combination (midnight-crossing supported); reminders pause, tracking continues
 - **Positive reinforcement** — a cheerful notification when you actually take that break
 - **Menu-bar dashboard** — current streak, countdown to next reminder, today's totals, last 7 days at a glance
 - **Stats window** — 7-day bar chart + today's details (SwiftUI Charts)
@@ -32,9 +32,9 @@ No permissions required. No network. No accounts. All data stays in a local JSON
 
 ## 📸 Screenshots
 
-| Stats window | Menu bar (resting) |
-| --- | --- |
-| <img src="docs/images/stats-window.png" width="320"> | <img src="docs/images/menubar.png"> |
+| Stats window | Menu bar (resting) | Notch capsule reminder |
+| --- | --- | --- |
+| <img src="docs/images/stats-window.png" width="300"> | <img src="docs/images/menubar.png"> | <img src="docs/images/notch-reminder.png" width="300"> |
 
 Menu bar states: 🪑 seated figure + minutes while working · ☕️ coffee cup while resting · ⏸ when paused.
 
@@ -60,7 +60,7 @@ Requires Xcode Command Line Tools (`xcode-select --install`).
 - Idle time comes from `IOHIDSystem → HIDIdleTime` (IOKit) — no Accessibility or Input Monitoring permission needed
 - Polls every 5 seconds; idle ≥ break threshold ⇒ break recorded, streak resets
 - Data lives in `~/Library/Application Support/UsageReminder/` (`config.json` + `data/stats.json`)
-- Strong alerts are native AppleScript dialogs; gentle mode uses standard notifications
+- Strong alerts are native AppleScript dialogs; gentle mode uses standard notifications; the notch capsule is a borderless NSPanel under the camera notch
 
 ## 🗺 Roadmap
 

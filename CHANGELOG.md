@@ -1,5 +1,13 @@
 # Changelog
 
+## v3.2 · 2026-10-13
+
+- 灵动岛胶囊提醒（默认）：贴着刘海/屏幕顶部滑出的黑色胶囊，一键关闭，不打断输入 / Dynamic-Island-style notch capsule reminder (default): a black capsule sliding down under the notch, one-click dismiss, no keyboard focus stolen
+- 提醒方式三选一：灵动岛胶囊 / 强提醒弹窗 / 温和通知，菜单切换立即预览 / Three reminder styles (notch capsule, strong alert, gentle banner), switchable from the menu with instant preview
+- 免打扰升级为多选时段：午休 / 晚间 / 夜间任意组合，支持跨午夜 / Do-not-disturb is now multi-select: lunch, evening and overnight presets in any combination, midnight-crossing supported
+- 修复 NSPanel 初始化方式导致的提醒窗口不显示问题 / Fix reminder panel not showing due to NSPanel styleMask initialization
+- build.sh 集成 ad-hoc 签名与纯净打包，产出可直接分享的 zip / build.sh now signs (ad-hoc) and packages a share-ready zip
+
 ## v3.1 · 2026-10-13
 
 - 新增免打扰时段（午休 / 夜间预设，支持跨午夜）/ Quiet hours presets (lunch break, overnight)

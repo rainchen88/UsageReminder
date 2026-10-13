@@ -30,5 +30,12 @@ lipo -create /tmp/UsageReminder-arm64 /tmp/UsageReminder-x86_64 \
 cp Info.plist "$APP/Info.plist"
 cp Assets/AppIcon.icns "$APP/Resources/AppIcon.icns"
 
+echo "临时签名（ad-hoc）..."
+# 经无属性中转目录签名，规避 provenance/FinderInfo 残留导致的 detritus 报错
+rm -rf /tmp/ur-sign.app
+ditto --norsrc --noextattr "久坐提醒.app" /tmp/ur-sign.app
+codesign --force --deep --sign - /tmp/ur-sign.app
+rm -rf "久坐提醒.app" && mv /tmp/ur-sign.app "久坐提醒.app"
+
 echo "完成：久坐提醒.app（装到 /Applications 后，数据在 ~/Library/Application Support/UsageReminder/）"
 file "$APP/MacOS/UsageReminder"

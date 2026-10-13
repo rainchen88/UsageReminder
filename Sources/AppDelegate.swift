@@ -14,6 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var stats = StatsStore()
     var configModDate: Date?
     var statsWindow: NSWindow?
+    let notchReminder = NotchReminderController()
 
     var sessionStart: Date?
     var lastPoll = Date()
@@ -82,9 +83,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if testAlertMode {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                self.showAlert(title: L.t("测试提醒 🧪", "Test alert 🧪"),
-                               message: L.t("强提醒工作正常：这个弹窗必须手动点掉。",
-                                            "Strong alerts work: this dialog must be dismissed manually."))
+                self.showReminder(icon: "figure.stand",
+                                  title: L.t("测试提醒 🧪", "Test alert 🧪"),
+                                  message: L.t("提醒样式预览。点一下关闭。",
+                                               "Reminder style preview. Tap to dismiss."),
+                                  snoozeKey: nil)
             }
         }
         if showStatsMode {
@@ -159,10 +162,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: 提醒
 
     func inQuietHours(_ now: Date) -> Bool {
-        let s = config.quietHoursStart, e = config.quietHoursEnd
-        guard s >= 0, e >= 0 else { return false }
         let h = Calendar.current.component(.hour, from: now)
-        return s <= e ? (h >= s && h < e) : (h >= s || h < e)  // 支持跨午夜区间
+        for period in config.quietPeriods {
+            guard period.count == 2 else { continue }
+            let s = period[0], e = period[1]
+            let inside = s <= e ? (h >= s && h < e) : (h >= s || h < e)  // 支持跨午夜
+            if inside { return true }
+        }
+        return false
     }
 
     func checkReminders(now: Date) {
@@ -183,19 +190,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             var d = today(); d.standReminders += 1; stats.days[todayKey()] = d; saveStats()
             let tip = L.isZh ? (standTipsZh.randomElement() ?? "") : (standTipsEn.randomElement() ?? "")
             let mins = Int(cont / 60)
-            showAlert(title: L.t("该起来活动了 🧍", "Time to stand up 🧍"),
-                      message: L.t("你已连续使用电脑 \(mins) 分钟。\n\n\(tip)\n\n休息 \(config.breakResetMinutes) 分钟后计时才会重置。",
-                                   "You've been using your Mac for \(mins) minutes straight.\n\n\(tip)\n\nThe timer resets after a \(config.breakResetMinutes)-minute break."),
-                      onSnooze: { [weak self] in self?.config.standReminderMinutes = 0; self?.saveConfig() })
+            showReminder(icon: "figure.stand",
+                         title: L.t("该起来活动了 🧍", "Time to stand up 🧍"),
+                         message: L.t("已连续使用 \(mins) 分钟。\(tip)",
+                                      "\(mins) minutes straight. \(tip)"),
+                         snoozeKey: "stand")
         } else if due(lastWaterAlert, config.waterReminderMinutes) {
             lastWaterAlert = now
             var d = today(); d.waterReminders += 1; stats.days[todayKey()] = d; saveStats()
             let tip = L.isZh ? (waterTipsZh.randomElement() ?? "") : (waterTipsEn.randomElement() ?? "")
             let mins = Int(cont / 60)
-            showAlert(title: L.t("喝口水吧 💧", "Drink some water 💧"),
-                      message: L.t("你已连续使用电脑 \(mins) 分钟，补充点水分。\n\n\(tip)",
-                                   "You've been using your Mac for \(mins) minutes. Hydrate!\n\n\(tip)"),
-                      onSnooze: { [weak self] in self?.config.waterReminderMinutes = 0; self?.saveConfig() })
+            showReminder(icon: "drop.fill",
+                         title: L.t("喝口水吧 💧", "Drink some water 💧"),
+                         message: L.t("已连续使用 \(mins) 分钟。\(tip)",
+                                      "\(mins) minutes straight. \(tip)"),
+                         snoozeKey: "water")
+        }
+    }
+
+    // 提醒分发：灵动岛胶囊（默认）/ 弹窗强提醒 / 普通通知
+    func showReminder(icon: String, title: String, message: String, snoozeKey: String?) {
+        NSSound.beep()
+        switch config.reminderStyle {
+        case .notch:
+            notchReminder.show(icon: icon, title: title, message: message) { /* 点按即确认 */ }
+        case .gentle:
+            showNotification(title, message)
+        case .strong:
+            showStrongAlert(title: title, message: message, snoozeKey: snoozeKey)
         }
     }
 
@@ -212,15 +234,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    // 提醒：温和模式用系统通知（自动消失），否则强提醒弹窗（必须手动点掉）
-    func showAlert(title: String, message: String, onSnooze: (() -> Void)? = nil) {
-        if config.gentleMode {
-            showNotification(title, message)
-            return
-        }
+    // 强提醒弹窗：「知道了」点掉；「不再提醒」直接关闭该类型提醒
+    func showStrongAlert(title: String, message: String, snoozeKey: String?) {
         guard !alertShowing else { return }
         alertShowing = true
-        NSSound.beep()
         let okBtn = L.t("知道了", "Got it")
         let offBtn = L.t("不再提醒", "Don't remind me")
         let script = "display alert \"\(esc(title))\" message \"\(esc(message))\" buttons {\"\(okBtn)\", \"\(offBtn)\"} default button 1"
@@ -235,10 +252,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             p.waitUntilExit()
             self.alertShowing = false
-            if out.contains(offBtn) {
-                DispatchQueue.main.async { onSnooze?() }
+            if out.contains(offBtn), let key = snoozeKey {
+                DispatchQueue.main.async { self.snoozeReminder(key) }
             }
         }
+    }
+
+    func snoozeReminder(_ key: String) {
+        if key == "water" { config.waterReminderMinutes = 0 }
+        if key == "stand" { config.standReminderMinutes = 0 }
+        saveConfig()
     }
 
     // MARK: 菜单栏图标 + 标题（SF Symbols 单色模板图标，自动适配深浅色）
@@ -340,11 +363,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sub.addItem(.separator())
         addQuietHoursGroup(to: sub)
         sub.addItem(.separator())
-        let gentleItem = NSMenuItem(title: L.t("温和提醒（通知不挡屏幕）", "Gentle mode (banner notifications)"),
-                                    action: #selector(toggleGentle), keyEquivalent: "")
-        gentleItem.target = self
-        gentleItem.state = config.gentleMode ? .on : .off
-        sub.addItem(gentleItem)
+        addStyleGroup(to: sub)
         settings.submenu = sub
         menu.addItem(settings)
         menu.addItem(.separator())
@@ -364,25 +383,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(quitItem)
     }
 
-    // 免打扰时段预设：tag 0=关闭 1=午休 2=夜间
+    // 免打扰时段（可多选，独立开关）
     func addQuietHoursGroup(to menu: NSMenu) {
-        let header = NSMenuItem(title: L.t("   免打扰时段", "   Quiet hours"), action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: L.t("   免打扰时段（可多选）", "   Quiet hours (multi-select)"), action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
-        let current: Int
-        if config.quietHoursStart == 12 && config.quietHoursEnd == 14 { current = 1 }
-        else if config.quietHoursStart == 22 && config.quietHoursEnd == 8 { current = 2 }
-        else { current = 0 }
-        let presets: [(Int, String, String)] = [
-            (0, "关闭", "Off"),
-            (1, "午休 12:00–14:00", "Lunch 12:00–14:00"),
-            (2, "夜间 22:00–08:00", "Night 22:00–08:00")
+        let presets: [(start: Int, end: Int, zh: String, en: String)] = [
+            (12, 14, "午休 12:00–14:00", "Lunch 12:00–14:00"),
+            (18, 22, "晚间 18:00–22:00", "Evening 18:00–22:00"),
+            (22, 8,  "夜间 22:00–08:00", "Night 22:00–08:00")
         ]
-        for (tag, zh, en) in presets {
-            let item = NSMenuItem(title: L.t(zh, en), action: #selector(setQuiet(_:)), keyEquivalent: "")
+        for p in presets {
+            let item = NSMenuItem(title: L.t(p.zh, p.en), action: #selector(toggleQuiet(_:)), keyEquivalent: "")
             item.target = self
-            item.tag = tag
-            item.state = (tag == current) ? .on : .off
+            item.tag = p.start * 100 + p.end
+            item.state = config.quietPeriods.contains([p.start, p.end]) ? .on : .off
+            menu.addItem(item)
+        }
+    }
+
+    // 提醒方式（单选）
+    func addStyleGroup(to menu: NSMenu) {
+        let header = NSMenuItem(title: L.t("   提醒方式", "   Reminder style"), action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        let styles: [(ReminderStyle, String, String)] = [
+            (.notch, "灵动岛胶囊（推荐）", "Dynamic Island capsule"),
+            (.strong, "弹窗强提醒", "Modal alert (hard to ignore)"),
+            (.gentle, "普通通知", "Banner notification")
+        ]
+        for (style, zh, en) in styles {
+            let item = NSMenuItem(title: L.t(zh, en), action: #selector(setStyle(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = style.rawValue
+            item.state = (style == config.reminderStyle) ? .on : .off
             menu.addItem(item)
         }
     }
@@ -454,9 +488,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateStatusTitle(Date())
     }
 
-    @objc func toggleGentle() {
-        config.gentleMode.toggle()
+    @objc func setStyle(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let style = ReminderStyle(rawValue: raw) else { return }
+        config.reminderStyle = style
         saveConfig()
+        // 立即预览新样式
+        showReminder(icon: "sparkles",
+                     title: L.t("提醒方式已切换", "Reminder style updated"),
+                     message: L.t("以后提醒会长这样。点一下关闭。", "Future reminders will look like this. Tap to dismiss."),
+                     snoozeKey: nil)
     }
 
     @objc func setWater(_ sender: NSMenuItem) { config.waterReminderMinutes = sender.tag; saveConfig() }
@@ -464,11 +505,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func setRepeat(_ sender: NSMenuItem) { config.repeatReminderMinutes = sender.tag; saveConfig() }
     @objc func setBreak(_ sender: NSMenuItem) { config.breakResetMinutes = sender.tag; saveConfig() }
 
-    @objc func setQuiet(_ sender: NSMenuItem) {
-        switch sender.tag {
-        case 1: config.quietHoursStart = 12; config.quietHoursEnd = 14
-        case 2: config.quietHoursStart = 22; config.quietHoursEnd = 8
-        default: config.quietHoursStart = -1; config.quietHoursEnd = -1
+    @objc func toggleQuiet(_ sender: NSMenuItem) {
+        let period = [sender.tag / 100, sender.tag % 100]
+        if let idx = config.quietPeriods.firstIndex(of: period) {
+            config.quietPeriods.remove(at: idx)
+        } else {
+            config.quietPeriods.append(period)
         }
         saveConfig()
     }
@@ -481,9 +523,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 try SMAppService.mainApp.register()
             }
         } catch {
-            showAlert(title: L.t("设置失败", "Setup failed"),
-                      message: L.t("无法自动设置开机启动。\n请手动前往：系统设置 → 通用 → 登录项与扩展 → 添加「久坐提醒」。",
-                                   "Couldn't set launch-at-login automatically.\nPlease go to System Settings → General → Login Items and add UsageReminder manually."))
+            showStrongAlert(title: L.t("设置失败", "Setup failed"),
+                            message: L.t("无法自动设置开机启动。\n请手动前往：系统设置 → 通用 → 登录项与扩展 → 添加「久坐提醒」。",
+                                         "Couldn't set launch-at-login automatically.\nPlease go to System Settings → General → Login Items and add UsageReminder manually."),
+                            snoozeKey: nil)
         }
     }
 
