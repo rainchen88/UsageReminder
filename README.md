@@ -3,7 +3,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
 ![Swift](https://img.shields.io/badge/swift-6-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Release](https://img.shields.io/badge/release-v0.4-brightgreen)
+![Release](https://img.shields.io/badge/release-v0.6.3-brightgreen)
 
 **[中文文档](README.zh-CN.md)**
 
@@ -46,8 +46,8 @@ Left-click the island for a quick dashboard · right-click for settings.
 
 ## 📦 Install
 
-1. Download `久坐提醒.zip` from [Releases](https://github.com/rainchen88/UsageReminder/releases)
-2. Unzip and drag `久坐提醒.app` into `/Applications`
+1. Download `久坐提醒.dmg` from [Releases](https://github.com/rainchen88/UsageReminder/releases)
+2. Open the DMG and drag `久坐提醒.app` onto the `Applications` folder
 3. First launch: **right-click → Open** (the app is not notarized yet)
 4. Requires **macOS 14+**
 

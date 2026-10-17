@@ -1,6 +1,7 @@
 # 构建产物
 *.app
 *.zip
+*.dmg
 Assets/AppIcon.iconset/
 Assets/AppIcon.icns
 

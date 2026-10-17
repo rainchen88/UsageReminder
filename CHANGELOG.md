@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.6.3 · 2026-10-17
+
+- 修复：重启 / 更新 App 后「连续使用」计时清零。进行中的会话起点现在持久化到本地，重启后无缝续算；若重启时正在休息，则按最后活跃时间正常收尾并计一次休息 / Fix: the continuous-use timer reset to zero after app restart/update. The ongoing session start is now persisted and resumed seamlessly; if you're idle at relaunch, the previous session is closed out properly and counts as a break
+- 退出/被终止（SIGTERM）时立即落盘统计数据，覆盖安装更新不再丢失最后一段时长 / Stats are flushed to disk on quit/SIGTERM — updating no longer loses the last minutes
+
+## v0.6.2 · 2026-10-17
+
+- 全英文界面：界面语言跟随系统（英文系统下控制台 / 灵动岛 / 提醒 / 统计全部英文），并修复 `-AppleLanguages` 强制语言不生效的问题 / Full English UI: every surface follows the system language; fixed `-AppleLanguages` override not taking effect
+- 应用名多语言：英文系统下访达与程序坞显示「UsageReminder」/ Localized app name — shows as "UsageReminder" on English systems
+- 分发格式改为 DMG 拖动安装盘（含 Applications 快捷方式），不再使用 zip；build.sh 一键产出 `久坐提醒-版本号.dmg` / Distribution switched from zip to a drag-install DMG (with Applications shortcut); build.sh now produces `久坐提醒-<version>.dmg`
+- 导出数据文件名跟随语言 / Exported data file name follows the UI language
+
+## v0.6.1 · 2026-10-17
+
+- 控制台左侧导航整行可点击（不再只有点中文字/图标才生效）/ Sidebar rows are now fully clickable, not just the label
+- 新增「文字离左右边缘距离」滑条（8–100pt）：胶囊耳朵上的图标和分钟数离屏幕边缘多远可调，实时预览 / New "edge padding" slider (8–100pt): how far the ear icon/minutes sit from the screen edges, with live preview
+
+## v0.6 · 2026-10-17
+
+- 全新「控制台」：设置 + 外观 + 提醒 + 统计合并为一个黑色独立窗口（左侧导航四页），窗口位置自动记忆 / New Control Center: settings, appearance, reminders and stats merged into one black window with sidebar navigation; remembers its position
+- 灵动岛尺寸可调：胶囊宽度（240–560pt）与展开看板高度（90–200pt）拉动条，拖动实时预览，一键恢复默认 / Adjustable island size: capsule width & expanded height sliders with live preview and one-click reset
+- 提醒文案自定义：喝水 / 站立的标题与正文均可修改，正文支持 {分钟} 占位符，留空回退默认 / Custom reminder text for water & stand (title + body), {分钟} placeholder supported, blank falls back to default
+- 效果预览：控制台里一键真实演示喝水 / 站立 / 升级版提醒 / 休息打卡 / 周报五种效果 / Preview buttons fire a real demo of each of the five reminder effects
+- 原右键小设置面板与独立统计窗口退役 / The old right-click mini panel and standalone stats window are retired
+
+## v0.5 · 2026-10-17
+
+- 数据目录统一为 `~/Library/Application Support/UsageReminder/`，更新 App 不再丢失统计与设置；首次启动自动迁移旧数据 / Data unified into `~/Library/Application Support/UsageReminder/` — updating the app no longer resets stats & settings; legacy data auto-migrated on first launch
+- 提醒被忽略后逐渐加强：灵动岛提醒 25 秒不点会变大变醒目，再忽略升级为强弹窗；可在设置关闭 / Escalating reminders: ignored island reminders grow more prominent, then escalate to a modal alert; can be disabled
+- 休息打卡：真正离开电脑休息达标后，灵动岛弹出鼓励动画 / Break celebration: the island cheers when you actually take a qualifying break
+- 全屏自动免打扰：前台 App 全屏（视频会议/观影）时自动暂停提醒，岛上显示「全屏免打扰中 🎬」/ Auto quiet hours while a fullscreen app is frontmost (meetings/movies)
+- 每周一健康报告：汇总上周使用时长、最长连续使用、休息次数，并与上上周对比 / Weekly Monday report: last week's totals, longest session, breaks, week-over-week trend
+- 设置面板新增「导出数据…」，一键导出统计 JSON / New "Export data…" button in settings
+- 修复：看板轮询覆盖提醒文案；展开时顶部偶发闪烁 / Fix: dashboard polling overwrote reminder text; occasional top flicker while expanding
+
 ## v0.4 · 2026-10-13
 
 - 灵动岛重设计：与刘海同高（不再凸出遮挡界面），顶部改为与刘海一致的肩部外弧线 / Island redesigned: flush with the notch height (no longer covers app UI), shoulder curves matching the physical notch

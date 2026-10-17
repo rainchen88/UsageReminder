@@ -29,6 +29,9 @@ lipo -create /tmp/UsageReminder-arm64 /tmp/UsageReminder-x86_64 \
   -output "$APP/MacOS/UsageReminder"
 cp Info.plist "$APP/Info.plist"
 cp Assets/AppIcon.icns "$APP/Resources/AppIcon.icns"
+# 应用名多语言（英文系统显示 UsageReminder）
+ditto Resources/en.lproj "$APP/Resources/en.lproj"
+ditto Resources/zh-Hans.lproj "$APP/Resources/zh-Hans.lproj"
 
 echo "临时签名（ad-hoc）..."
 # 经无属性中转目录签名，规避 provenance/FinderInfo 残留导致的 detritus 报错
@@ -37,5 +40,15 @@ ditto --norsrc --noextattr "久坐提醒.app" /tmp/ur-sign.app
 codesign --force --deep --sign - /tmp/ur-sign.app
 rm -rf "久坐提醒.app" && mv /tmp/ur-sign.app "久坐提醒.app"
 
-echo "完成：久坐提醒.app（装到 /Applications 后，数据在 ~/Library/Application Support/UsageReminder/）"
+echo "打包 DMG（拖动安装盘）..."
+VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Info.plist)
+DMG="久坐提醒-$VERSION.dmg"
+rm -rf /tmp/ur-dmg "$DMG"
+mkdir -p /tmp/ur-dmg
+ditto --norsrc --noextattr "久坐提醒.app" "/tmp/ur-dmg/久坐提醒.app"
+ln -s /Applications /tmp/ur-dmg/Applications
+hdiutil create -volname "久坐提醒" -srcfolder /tmp/ur-dmg -ov -format UDZO "$DMG" >/dev/null
+rm -rf /tmp/ur-dmg
+
+echo "完成：久坐提醒.app + $DMG（数据在 ~/Library/Application Support/UsageReminder/）"
 file "$APP/MacOS/UsageReminder"

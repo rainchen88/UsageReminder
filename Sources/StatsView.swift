@@ -69,8 +69,8 @@ struct StatsView: View {
                 statRow(L.t("已完成休息", "Breaks taken"), "\(today.breaks)")
             }
         }
-        .padding(20)
-        .frame(width: 400)
+        .padding(4)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     func statRow(_ label: String, _ value: String) -> some View {

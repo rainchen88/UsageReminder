@@ -14,9 +14,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var config = Config()
     var stats = StatsStore()
     var configModDate: Date?
-    var statsWindow: NSWindow?
     let island = NotchIslandController()
-    let settingsPanel = SettingsPanelController()
+    let controlCenter = ControlCenterController()
 
     var sessionStart: Date?
     var lastPoll = Date()
@@ -24,30 +23,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var lastStandAlert: Date?
     var alertShowing = false
     var lastFlush = Date()
+    var fullscreenNow = false          // 前台 App 是否全屏（会议/视频自动免打扰）
+    var waterEscalation = 0            // 喝水提醒连续被忽略次数
+    var standEscalation = 0            // 站立提醒连续被忽略次数
+    var termSignalSource: DispatchSourceSignal?   // 持有 SIGTERM 监听，防止被释放
 
-    // 数据目录：
-    // - 安装在「应用程序」里运行时 → ~/Library/Application Support/UsageReminder/
-    // - 开发调试（在别的目录运行）→ .app 旁边，方便查看
+    // 数据目录：统一放 ~/Library/Application Support/UsageReminder/
+    // 不管 app 从哪里运行（应用程序 / 下载 / 桌面），数据都指向同一个家，更新绝不丢数据。
+    // 只有带 --dev-data 旗标的调试运行才用可执行文件旁边的目录。
     lazy var baseDir: URL = {
+        let support = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/UsageReminder")
+        try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+
         let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
-        var dir = exe.deletingLastPathComponent()
-        var isInstalled = false
-        if dir.lastPathComponent == "MacOS",
-           dir.deletingLastPathComponent().lastPathComponent == "Contents" {
-            let bundle = dir.deletingLastPathComponent().deletingLastPathComponent()
+        let exeDir = exe.deletingLastPathComponent()
+        if CommandLine.arguments.contains("--dev-data") {
+            return exeDir   // 开发调试
+        }
+
+        // 旧版本数据迁移：app 旁边有数据、统一目录里没有 → 搬过来
+        var legacyDir = exeDir
+        if exeDir.lastPathComponent == "MacOS",
+           exeDir.deletingLastPathComponent().lastPathComponent == "Contents" {
+            let bundle = exeDir.deletingLastPathComponent().deletingLastPathComponent()
             if bundle.pathExtension == "app" {
-                let parent = bundle.deletingLastPathComponent()
-                isInstalled = parent.path == "/Applications" || parent.path == NSHomeDirectory() + "/Applications"
-                dir = parent
+                legacyDir = bundle.deletingLastPathComponent()
             }
         }
-        if isInstalled {
-            let support = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/UsageReminder")
-            try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
-            return support
+        let fm = FileManager.default
+        let legacyConfig = legacyDir.appendingPathComponent("config.json")
+        let newConfig = support.appendingPathComponent("config.json")
+        if !fm.fileExists(atPath: newConfig.path), fm.fileExists(atPath: legacyConfig.path) {
+            try? fm.copyItem(at: legacyConfig, to: newConfig)
+            let legacyData = legacyDir.appendingPathComponent("data")
+            if fm.fileExists(atPath: legacyData.path) {
+                try? fm.copyItem(at: legacyData, to: support.appendingPathComponent("data"))
+            }
         }
-        return dir
+        return support
     }()
     lazy var configURL: URL = baseDir.appendingPathComponent("config.json")
     lazy var dataDir: URL = baseDir.appendingPathComponent("data")
@@ -75,11 +89,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         loadConfig()
         loadStats()
 
-        // 灵动岛：左键看板，右键设置
+        // 灵动岛：左键看板，右键控制台
         island.onRightClick = { [weak self] in self?.toggleSettings() }
+        island.applyAppearance(width: CGFloat(config.islandWidth), expandedHeight: CGFloat(config.expandedHeight), earPadding: CGFloat(config.pillPadding))
         updateIsland(Date())
         island.start(enabled: config.islandEnabled)
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.poll() }
+
+        // 优雅处理 SIGTERM（更新/覆盖安装前的 pkill）：先落盘再退出，最多不丢一秒
+        signal(SIGTERM, SIG_IGN)
+        let termSrc = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        termSrc.setEventHandler { [weak self] in
+            self?.saveStats()
+            exit(0)
+        }
+        termSrc.resume()
+        termSignalSource = termSrc
 
         if testAlertMode {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -102,7 +127,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if testSettingsMode {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                self.toggleSettings()
+                let tabArg = CommandLine.arguments.first(where: { $0.hasPrefix("--test-tab=") })
+                let tab = tabArg
+                    .flatMap { Int($0.split(separator: "=")[1]) }
+                    .flatMap { ControlTab(rawValue: $0) }
+                self.controlCenter.show(actions: { self.wireControlCenter($0) }, tab: tab)
             }
         }
         log("started, baseDir=\(baseDir.path)")
@@ -120,13 +149,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let breakSecs = TimeInterval(config.breakResetMinutes * 60)
         let elapsed = now.timeIntervalSince(lastPoll)
         lastPoll = now
+        fullscreenNow = config.fullscreenPause && isFrontmostFullscreen()
 
         if idle < breakSecs {
             if sessionStart == nil {
-                sessionStart = now.addingTimeInterval(-idle)
+                // 重启/更新续接：stats 里存着上一段未结束的会话 → 接着算，不清零
+                if let saved = stats.ongoingSessionStart, saved <= now.timeIntervalSince1970 {
+                    sessionStart = Date(timeIntervalSince1970: saved)
+                    log("session restored from disk: \(Int(now.timeIntervalSince(sessionStart!)))s")
+                } else {
+                    sessionStart = now.addingTimeInterval(-idle)
+                }
+                stats.ongoingSessionStart = sessionStart!.timeIntervalSince1970
+                saveStats()
                 lastWaterAlert = nil
                 lastStandAlert = nil
             }
+            stats.lastActiveAt = now.timeIntervalSince1970
             var d = today()
             d.totalActiveSeconds += elapsed
             stats.days[todayKey()] = d
@@ -134,11 +173,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             if let s = sessionStart {
                 endSession(start: s, end: now.addingTimeInterval(-idle))
+            } else if let saved = stats.ongoingSessionStart {
+                // 上次退出时还在用电脑，现在处于休息：按最后活跃时间把那段会话收尾
+                let end = Date(timeIntervalSince1970: stats.lastActiveAt ?? saved)
+                endSession(start: Date(timeIntervalSince1970: saved), end: max(end, Date(timeIntervalSince1970: saved)))
             }
             sessionStart = nil
         }
 
         updateIsland(now)
+        checkWeeklyReport(now: now)
         reloadConfigIfChanged()
 
         if now.timeIntervalSince(lastFlush) > 60 {
@@ -152,7 +196,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func endSession(start: Date, end: Date) {
         let secs = end.timeIntervalSince(start)
-        guard secs > 0 else { return }
+        stats.ongoingSessionStart = nil
+        stats.lastActiveAt = nil
+        guard secs > 0 else { saveStats(); return }
         var d = today()
         d.sessions.append(Session(start: start.timeIntervalSince1970, end: end.timeIntervalSince1970, seconds: secs))
         d.longestSessionSeconds = max(d.longestSessionSeconds, secs)
@@ -161,12 +207,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         saveStats()
         log("session ended: \(Int(secs))s")
 
-        // 久坐后成功休息 → 发个鼓励通知（不打断，自动消失）
-        if secs >= 30 * 60, !config.paused, !inQuietHours(Date()) {
-            showNotification(L.t("干得漂亮 🎉", "Well done 🎉"),
-                             L.t("连续工作 \(fmtDuration(secs)) 后成功休息了一次，身体谢谢你。",
-                                 "You took a real break after \(fmtDuration(secs)) of work. Your body thanks you."))
+        // 久坐后成功休息 → 休息打卡（灵动岛 ✅ 卡片 / 其他模式走通知）
+        waterEscalation = 0
+        standEscalation = 0   // 真休息后提醒等级归零
+        if secs >= 30 * 60, config.breakPraiseEnabled, !config.paused, !inQuietHours(Date()) {
+            let breaksToday = today().breaks
+            let msg = L.t("连续工作 \(fmtDuration(secs)) 后休息了一次，这是今日第 \(breaksToday) 次休息。",
+                          "You took a real break after \(fmtDuration(secs)) — break #\(breaksToday) today.")
+            if config.reminderStyle == .notch {
+                island.showCelebration(title: L.t("休息完成 ✅", "Break complete ✅"), message: msg)
+            } else {
+                showNotification(L.t("干得漂亮 🎉", "Well done 🎉"), msg)
+            }
         }
+    }
+
+    // 全屏检测：前台 App 的窗口铺满整块屏（开会/看视频）→ 自动免打扰
+    func isFrontmostFullscreen() -> Bool {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              let screen = NSScreen.main else { return false }
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return false }
+        for w in list {
+            guard let owner = w[kCGWindowOwnerPID as String] as? Int32, owner == pid,
+                  let layer = w[kCGWindowLayer as String] as? Int, layer == 0,
+                  let bounds = w[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
+            let wf = CGRect(x: bounds["X"] ?? 0, y: bounds["Y"] ?? 0,
+                            width: bounds["Width"] ?? 0, height: bounds["Height"] ?? 0)
+            if wf.width >= screen.frame.width - 4 && wf.height >= screen.frame.height - 4 { return true }
+        }
+        return false
     }
 
     // MARK: 提醒
@@ -183,7 +252,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func checkReminders(now: Date) {
-        guard !config.paused, !inQuietHours(now), let s = sessionStart else { return }
+        guard !config.paused, !inQuietHours(now), !fullscreenNow, let s = sessionStart else { return }
         let cont = now.timeIntervalSince(s)
         let repeatSecs = TimeInterval(config.repeatReminderMinutes * 60)
 
@@ -200,30 +269,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             var d = today(); d.standReminders += 1; stats.days[todayKey()] = d; saveStats()
             let tip = L.isZh ? (standTipsZh.randomElement() ?? "") : (standTipsEn.randomElement() ?? "")
             let mins = Int(cont / 60)
+            let c = reminderCopy(kind: "stand", mins: mins, tip: tip)
             showReminder(icon: "figure.stand",
-                         title: L.t("该起来活动了 🧍", "Time to stand up 🧍"),
-                         message: L.t("已连续使用 \(mins) 分钟。\(tip)",
-                                      "\(mins) minutes straight. \(tip)"),
-                         snoozeKey: "stand")
+                         title: c.title, message: c.message,
+                         snoozeKey: "stand", level: standEscalation)
         } else if due(lastWaterAlert, config.waterReminderMinutes) {
             lastWaterAlert = now
             var d = today(); d.waterReminders += 1; stats.days[todayKey()] = d; saveStats()
             let tip = L.isZh ? (waterTipsZh.randomElement() ?? "") : (waterTipsEn.randomElement() ?? "")
             let mins = Int(cont / 60)
+            let c = reminderCopy(kind: "water", mins: mins, tip: tip)
             showReminder(icon: "drop.fill",
-                         title: L.t("喝口水吧 💧", "Drink some water 💧"),
-                         message: L.t("已连续使用 \(mins) 分钟。\(tip)",
-                                      "\(mins) minutes straight. \(tip)"),
-                         snoozeKey: "water")
+                         title: c.title, message: c.message,
+                         snoozeKey: "water", level: waterEscalation)
         }
     }
 
+    func bumpEscalation(_ key: String?) {
+        guard config.escalateReminders else { return }
+        if key == "water" { waterEscalation += 1 }
+        if key == "stand" { standEscalation += 1 }
+    }
+
+    func resetEscalation(_ key: String?) {
+        if key == "water" { waterEscalation = 0 }
+        if key == "stand" { standEscalation = 0 }
+    }
+
     // 提醒分发：灵动岛胶囊（默认）/ 弹窗强提醒 / 普通通知
-    func showReminder(icon: String, title: String, message: String, snoozeKey: String?) {
+    // 升级机制：提醒被忽略 → 下次更大且必须手动点掉；再忽略 → 升级为强弹窗
+    func showReminder(icon: String, title: String, message: String, snoozeKey: String?, level: Int = 0) {
         NSSound.beep()
+        let effLevel = config.escalateReminders ? level : 0
         switch config.reminderStyle {
         case .notch:
-            island.showReminder(icon: icon, title: title, message: message) { /* 点按即确认 */ }
+            if effLevel >= 2 {
+                showStrongAlert(title: title, message: message, snoozeKey: snoozeKey)
+            } else {
+                island.showReminder(icon: icon, title: title, message: message, level: effLevel,
+                                    onAcknowledge: { self.resetEscalation(snoozeKey) },
+                                    onIgnored: { self.bumpEscalation(snoozeKey) })
+            }
         case .gentle:
             showNotification(title, message)
         case .strong:
@@ -303,6 +389,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var line3 = ""
         if inQuietHours(now) {
             line3 = L.t("免打扰中 🌙", "Quiet hours 🌙")
+        } else if fullscreenNow {
+            line3 = L.t("全屏免打扰中 🎬", "Fullscreen — auto quiet 🎬")
         } else if config.paused {
             line3 = L.t("提醒已暂停", "Reminders paused")
         } else if let s = sessionStart, let next = nextReminder(now: now, cont: now.timeIntervalSince(s)) {
@@ -316,30 +404,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                       line1: line1, line2: line2, line3: line3)
     }
 
-    // MARK: 设置面板（右键灵动岛打开）
+    // MARK: 控制台（右键灵动岛打开）
 
     func toggleSettings() {
-        settingsPanel.toggle { [weak self] m in
-            guard let self = self else { return }
-            m.paused = self.config.paused
-            m.launchAtLogin = SMAppService.mainApp.status == .enabled
-            m.islandEnabled = self.config.islandEnabled
-            m.waterMinutes = self.config.waterReminderMinutes
-            m.standMinutes = self.config.standReminderMinutes
-            m.repeatMinutes = self.config.repeatReminderMinutes
-            m.breakMinutes = self.config.breakResetMinutes
-            m.quietPeriods = self.config.quietPeriods
-            m.reminderStyle = self.config.reminderStyle
-            m.onChanged = { self.applySettings(m) }
-            m.onStylePreview = { self.previewReminderStyle() }
-            m.onOpenStats = { self.openStatsWindow() }
-            m.onOpenDataFolder = { NSWorkspace.shared.open(self.baseDir) }
-            m.onQuit = { self.quitApp() }
-        }
+        controlCenter.toggle { [weak self] m in self?.wireControlCenter(m) }
     }
 
-    // 设置面板任何字段变化都落到这里
-    func applySettings(_ m: SettingsModel) {
+    func wireControlCenter(_ m: ControlCenterModel) {
+        m.paused = config.paused
+        m.launchAtLogin = SMAppService.mainApp.status == .enabled
+        m.islandEnabled = config.islandEnabled
+        m.waterMinutes = config.waterReminderMinutes
+        m.standMinutes = config.standReminderMinutes
+        m.repeatMinutes = config.repeatReminderMinutes
+        m.breakMinutes = config.breakResetMinutes
+        m.quietPeriods = config.quietPeriods
+        m.reminderStyle = config.reminderStyle
+        m.escalateReminders = config.escalateReminders
+        m.breakPraiseEnabled = config.breakPraiseEnabled
+        m.fullscreenPause = config.fullscreenPause
+        m.weeklyReportEnabled = config.weeklyReportEnabled
+        m.islandWidth = config.islandWidth
+        m.expandedHeight = config.expandedHeight
+        m.pillPadding = config.pillPadding
+        m.waterTitle = config.waterTitle
+        m.waterMessage = config.waterMessage
+        m.standTitle = config.standTitle
+        m.standMessage = config.standMessage
+        m.onChanged = { self.applySettings(m) }
+        m.onStylePreview = { self.previewReminderStyle() }
+        m.onPreview = { kind in self.previewReminder(kind) }
+        m.onRefreshStats = { self.fillStats(m) }
+        m.onOpenDataFolder = { NSWorkspace.shared.open(self.baseDir) }
+        m.onExportData = { self.exportData() }
+        m.onQuit = { self.quitApp() }
+    }
+
+    // 控制台任何字段变化都落到这里
+    func applySettings(_ m: ControlCenterModel) {
         config.paused = m.paused
         config.islandEnabled = m.islandEnabled
         config.waterReminderMinutes = m.waterMinutes
@@ -348,11 +450,93 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         config.breakResetMinutes = m.breakMinutes
         config.quietPeriods = m.quietPeriods
         config.reminderStyle = m.reminderStyle
+        config.escalateReminders = m.escalateReminders
+        config.breakPraiseEnabled = m.breakPraiseEnabled
+        config.fullscreenPause = m.fullscreenPause
+        config.weeklyReportEnabled = m.weeklyReportEnabled
+        config.islandWidth = m.islandWidth
+        config.expandedHeight = m.expandedHeight
+        config.pillPadding = m.pillPadding
+        config.waterTitle = m.waterTitle
+        config.waterMessage = m.waterMessage
+        config.standTitle = m.standTitle
+        config.standMessage = m.standMessage
         saveConfig()
 
+        island.applyAppearance(width: CGFloat(m.islandWidth), expandedHeight: CGFloat(m.expandedHeight), earPadding: CGFloat(m.pillPadding))
         island.start(enabled: config.islandEnabled)
         applyLaunchAtLogin(m.launchAtLogin)
         updateIsland(Date())
+    }
+
+    // 把最新统计填进控制台的统计页
+    func fillStats(_ m: ControlCenterModel) {
+        let now = Date()
+        let cal = Calendar.current
+        var bars: [DayBar] = []
+        var weekTotal: TimeInterval = 0
+        for offset in stride(from: 6, through: 0, by: -1) {
+            guard let date = cal.date(byAdding: .day, value: -offset, to: now) else { continue }
+            let key = dayFmt.string(from: date)
+            let day = stats.days[key]
+            let label = offset == 0 ? L.t("今天", "Today") : weekdayFmt.string(from: date)
+            let secs = day?.totalActiveSeconds ?? 0
+            weekTotal += secs
+            bars.append(DayBar(label: label, minutes: secs / 60, isToday: offset == 0))
+        }
+        m.bars = bars
+        m.weekTotal = weekTotal
+        m.todayStats = today()
+        m.currentContinuous = sessionStart.map { now.timeIntervalSince($0) } ?? 0
+    }
+
+    // 提醒文案：用户自定义优先（支持 {分钟} 占位符），否则默认文案 + 随机小贴士
+    func reminderCopy(kind: String, mins: Int, tip: String) -> (title: String, message: String) {
+        let defTitle = kind == "water"
+            ? L.t("喝口水吧 💧", "Drink some water 💧")
+            : L.t("该起来活动了 🧍", "Time to stand up 🧍")
+        let customTitle = kind == "water" ? config.waterTitle : config.standTitle
+        let customMsg = kind == "water" ? config.waterMessage : config.standMessage
+        let title = customTitle.isEmpty ? defTitle : customTitle
+        let message: String
+        if customMsg.isEmpty {
+            message = L.t("已连续使用 \(mins) 分钟。\(tip)", "\(mins) minutes straight. \(tip)")
+        } else {
+            message = customMsg
+                .replacingOccurrences(of: "{分钟}", with: "\(mins)")
+                .replacingOccurrences(of: "{minutes}", with: "\(mins)")
+        }
+        return (title, message)
+    }
+
+    // 控制台「效果预览」：真实弹一次对应效果
+    func previewReminder(_ kind: String) {
+        let tip = L.isZh ? (waterTipsZh.randomElement() ?? "") : (waterTipsEn.randomElement() ?? "")
+        switch kind {
+        case "water":
+            let c = reminderCopy(kind: "water", mins: 42, tip: tip)
+            showReminder(icon: "drop.fill", title: c.title, message: c.message, snoozeKey: nil)
+        case "stand":
+            let c = reminderCopy(kind: "stand", mins: 63, tip: tip)
+            showReminder(icon: "figure.stand", title: c.title, message: c.message, snoozeKey: nil)
+        case "escalated":
+            // 直接演示升级形态（更大、必须手动关闭），不受升级开关影响
+            island.showReminder(icon: "exclamationmark.triangle.fill",
+                                title: L.t("升级版提醒长这样", "This is the escalated one"),
+                                message: L.t("忽略普通提醒后，下一次会变得更大，而且必须手动点掉。",
+                                             "Ignored reminders come back bigger and must be dismissed manually."),
+                                level: 1, onAcknowledge: {})
+        case "celebration":
+            island.showCelebration(title: L.t("休息完成 ✅", "Break complete ✅"),
+                                   message: L.t("连续工作 1 小时 5 分后休息了一次，这是今日第 3 次休息。",
+                                                "You took a real break after 1h 5m — break #3 today."))
+        case "weekly":
+            island.showCelebration(title: L.t("上周健康报告 📊", "Weekly report 📊"),
+                                   message: L.t("上周共用 38 小时 20 分 · 日均 7 小时 40 分 · 最长连续 2 小时 15 分 · 休息 21 次。比上上周多 8%，注意休息。",
+                                                "Last week: 38h 20m total · 7h 40m/day · longest 2h 15m · 21 breaks. 8% more than the week before — remember to rest."),
+                                   duration: 15)
+        default: break
+        }
     }
 
     func previewReminderStyle() {
@@ -391,39 +575,73 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
+    // MARK: 每周健康报告（每周一 9 点后第一次轮询弹出）
+
+    func checkWeeklyReport(now: Date) {
+        guard config.weeklyReportEnabled else { return }
+        let cal = Calendar.current
+        let weekday = cal.component(.weekday, from: now)   // 2 = 周一
+        let hour = cal.component(.hour, from: now)
+        guard weekday == 2, hour >= 9, sessionStart != nil else { return }
+        guard let monday = cal.date(byAdding: .day, value: -(weekday - 2), to: now) else { return }
+        let weekKey = dayFmt.string(from: monday)
+        guard stats.lastWeeklyReportWeek != weekKey else { return }
+        stats.lastWeeklyReportWeek = weekKey
+        saveStats()
+
+        let last = weekStats(endingBefore: monday)
+        let prev = weekStats(endingBefore: cal.date(byAdding: .day, value: -7, to: monday) ?? monday)
+        guard last.total > 0 else { return }   // 上周没数据就不打扰
+
+        let avg = last.days > 0 ? last.total / Double(last.days) : 0
+        var msg = L.t("上周共用 \(fmtDuration(last.total)) · 日均 \(fmtDuration(avg)) · 最长连续 \(fmtDuration(last.longest)) · 休息 \(last.breaks) 次。",
+                      "Last week: \(fmtDuration(last.total)) total · \(fmtDuration(avg))/day · longest \(fmtDuration(last.longest)) · \(last.breaks) breaks.")
+        if prev.total > 0 {
+            let diff = Int(((last.total - prev.total) / prev.total) * 100)
+            if abs(diff) >= 3 {
+                msg += L.t(diff > 0 ? "比上上周多 \(diff)%，注意休息。" : "比上上周少 \(abs(diff))%，保持得不错。",
+                           diff > 0 ? " \(diff)% more than the week before — remember to rest." : " \(abs(diff))% less than the week before. Nice.")
+            }
+        }
+        island.showCelebration(title: L.t("上周健康报告 📊", "Weekly report 📊"), message: msg, duration: 15)
+    }
+
+    // 汇总某个周一之前 7 天的数据
+    func weekStats(endingBefore monday: Date) -> (total: TimeInterval, days: Int, longest: TimeInterval, breaks: Int) {
+        let cal = Calendar.current
+        var total: TimeInterval = 0, longest: TimeInterval = 0
+        var breaks = 0, activeDays = 0
+        for i in 1...7 {
+            guard let day = cal.date(byAdding: .day, value: -i, to: monday) else { continue }
+            if let d = stats.days[dayFmt.string(from: day)], d.totalActiveSeconds > 0 {
+                total += d.totalActiveSeconds
+                longest = max(longest, d.longestSessionSeconds)
+                breaks += d.breaks
+                activeDays += 1
+            }
+        }
+        return (total, activeDays, longest, breaks)
+    }
+
+    // MARK: 导出数据
+
+    func exportData() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = L.t("久坐提醒数据-\(todayKey()).json", "UsageReminder-data-\(todayKey()).json")
+        panel.begin { resp in
+            guard resp == .OK, let url = panel.url else { return }
+            try? FileManager.default.copyItem(at: self.statsURL, to: url)
+        }
+    }
+
     @objc func openStats() {
         openStatsWindow()
     }
 
+    // 统计已并入控制台：直接打开控制台并切到统计页
     func openStatsWindow() {
-        log("openStatsWindow called")
-        let now = Date()
-        let cal = Calendar.current
-        var bars: [DayBar] = []
-        var weekTotal: TimeInterval = 0
-        for offset in stride(from: 6, through: 0, by: -1) {
-            guard let date = cal.date(byAdding: .day, value: -offset, to: now) else { continue }
-            let key = dayFmt.string(from: date)
-            let day = stats.days[key]
-            let label = offset == 0 ? L.t("今天", "Today") : weekdayFmt.string(from: date)
-            let secs = day?.totalActiveSeconds ?? 0
-            weekTotal += secs
-            bars.append(DayBar(label: label, minutes: secs / 60, isToday: offset == 0))
-        }
-        let cont = sessionStart.map { now.timeIntervalSince($0) } ?? 0
-        let view = StatsView(days: bars, today: today(), currentContinuous: cont, weekTotal: weekTotal)
-
-        let win = NSWindow(contentViewController: NSHostingController(rootView: view))
-        win.title = L.t("久坐提醒 · 使用统计", "UsageReminder · Stats")
-        win.styleMask = [.titled, .closable]
-        win.setContentSize(NSSize(width: 440, height: 620))  // 显式尺寸，避免 hosting 布局塌缩
-        win.isReleasedWhenClosed = false
-        win.center()
-        win.makeKeyAndOrderFront(nil)
-        win.orderFrontRegardless()   // 确保窗口在其他应用之上
-        NSApp.activate(ignoringOtherApps: true)
-        statsWindow = win
-        log("stats window visible=\(win.isVisible) frame=\(win.frame)")
+        controlCenter.show(actions: { [weak self] m in self?.wireControlCenter(m) }, tab: .stats)
     }
 
     @objc func openDataFolder() {

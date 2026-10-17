@@ -3,7 +3,14 @@ import Foundation
 // MARK: - 本地化（跟随系统语言）
 
 enum L {
-    static let isZh = Locale.current.language.languageCode?.identifier == "zh"
+    // 语言判定：优先 AppleLanguages（支持 -AppleLanguages 启动参数覆盖），回退系统首选语言
+    static let isZh: Bool = {
+        let langs = UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? Locale.preferredLanguages
+        guard let first = langs.first else {
+            return Locale.current.language.languageCode?.identifier == "zh"
+        }
+        return first.hasPrefix("zh")
+    }()
     static func t(_ zh: String, _ en: String) -> String { isZh ? zh : en }
 }
 
@@ -23,6 +30,18 @@ struct Config: Codable {
     var reminderStyle: ReminderStyle = .notch
     var islandEnabled: Bool = true       // 灵动岛胶囊常驻显示
     var paused: Bool = false
+    var escalateReminders: Bool = true   // 提醒被忽略后逐渐加强
+    var breakPraiseEnabled: Bool = true  // 休息打卡鼓励
+    var fullscreenPause: Bool = true     // 全屏（会议/视频）时自动免打扰
+    var weeklyReportEnabled: Bool = true // 每周一健康报告
+    var islandWidth: Double = 320        // 灵动岛胶囊宽度（pt）
+    var expandedHeight: Double = 122     // 展开看板的内容高度（pt，不含刘海区）
+    var pillPadding: Double = 20         // 胶囊「耳朵」内容离左右边缘的距离（pt）
+    // 自定义提醒文案：空字符串 = 用默认文案；正文支持 {分钟} 占位符
+    var waterTitle: String = ""
+    var waterMessage: String = ""
+    var standTitle: String = ""
+    var standMessage: String = ""
 
     init() {}
 
@@ -30,6 +49,9 @@ struct Config: Codable {
     enum CodingKeys: String, CodingKey {
         case waterReminderMinutes, standReminderMinutes, breakResetMinutes
         case repeatReminderMinutes, quietPeriods, reminderStyle, islandEnabled, paused
+        case escalateReminders, breakPraiseEnabled, fullscreenPause, weeklyReportEnabled
+        case islandWidth, expandedHeight, pillPadding
+        case waterTitle, waterMessage, standTitle, standMessage
         case gentleMode, quietHoursStart, quietHoursEnd   // 仅用于读取旧配置
     }
 
@@ -41,6 +63,17 @@ struct Config: Codable {
         repeatReminderMinutes = try c.decodeIfPresent(Int.self, forKey: .repeatReminderMinutes) ?? 15
         paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? false
         islandEnabled = try c.decodeIfPresent(Bool.self, forKey: .islandEnabled) ?? true
+        escalateReminders = try c.decodeIfPresent(Bool.self, forKey: .escalateReminders) ?? true
+        breakPraiseEnabled = try c.decodeIfPresent(Bool.self, forKey: .breakPraiseEnabled) ?? true
+        fullscreenPause = try c.decodeIfPresent(Bool.self, forKey: .fullscreenPause) ?? true
+        weeklyReportEnabled = try c.decodeIfPresent(Bool.self, forKey: .weeklyReportEnabled) ?? true
+        islandWidth = try c.decodeIfPresent(Double.self, forKey: .islandWidth) ?? 320
+        expandedHeight = try c.decodeIfPresent(Double.self, forKey: .expandedHeight) ?? 122
+        pillPadding = try c.decodeIfPresent(Double.self, forKey: .pillPadding) ?? 20
+        waterTitle = try c.decodeIfPresent(String.self, forKey: .waterTitle) ?? ""
+        waterMessage = try c.decodeIfPresent(String.self, forKey: .waterMessage) ?? ""
+        standTitle = try c.decodeIfPresent(String.self, forKey: .standTitle) ?? ""
+        standMessage = try c.decodeIfPresent(String.self, forKey: .standMessage) ?? ""
 
         if let style = try c.decodeIfPresent(ReminderStyle.self, forKey: .reminderStyle) {
             reminderStyle = style
@@ -67,6 +100,17 @@ struct Config: Codable {
         try c.encode(reminderStyle, forKey: .reminderStyle)
         try c.encode(islandEnabled, forKey: .islandEnabled)
         try c.encode(paused, forKey: .paused)
+        try c.encode(escalateReminders, forKey: .escalateReminders)
+        try c.encode(breakPraiseEnabled, forKey: .breakPraiseEnabled)
+        try c.encode(fullscreenPause, forKey: .fullscreenPause)
+        try c.encode(weeklyReportEnabled, forKey: .weeklyReportEnabled)
+        try c.encode(islandWidth, forKey: .islandWidth)
+        try c.encode(expandedHeight, forKey: .expandedHeight)
+        try c.encode(pillPadding, forKey: .pillPadding)
+        try c.encode(waterTitle, forKey: .waterTitle)
+        try c.encode(waterMessage, forKey: .waterMessage)
+        try c.encode(standTitle, forKey: .standTitle)
+        try c.encode(standMessage, forKey: .standMessage)
     }
 }
 
@@ -89,6 +133,9 @@ struct DayStats: Codable {
 
 struct StatsStore: Codable {
     var days: [String: DayStats] = [:]
+    var lastWeeklyReportWeek: String?   // 上次已弹出周报的周（避免重复弹）
+    var ongoingSessionStart: TimeInterval?  // 进行中会话的起点（重启/更新后接着算）
+    var lastActiveAt: TimeInterval?         // 最后一次检测到活跃的时间（崩溃/退出后收尾用）
 }
 
 // MARK: - 工具

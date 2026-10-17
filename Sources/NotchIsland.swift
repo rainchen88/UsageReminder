@@ -12,42 +12,6 @@ import SwiftUI
 //   reminder  提醒时展开，点 × 或点按确认后收起
 // 右键点击：打开设置面板
 
-// 刘海轮廓：顶边比身体宽，两侧肩膀是平滑的四分之一圆弧
-// （弧线与顶边水平相切、与侧壁垂直相切——与 MacBook 刘海肩部一致）；底部圆角
-struct NotchCapsuleShape: Shape {
-    var topFillet: CGFloat      // 肩部外扩宽度/深度
-    var bottomRadius: CGFloat   // 底部圆角
-
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(topFillet, bottomRadius) }
-        set { topFillet = newValue.first; bottomRadius = newValue.second }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        let f = topFillet, b = bottomRadius
-        let w = rect.width, h = rect.height
-        let k: CGFloat = 0.5523   // 四分之一圆的贝塞尔近似系数
-        p.move(to: CGPoint(x: 0, y: 0))
-        p.addLine(to: CGPoint(x: w, y: 0))
-        // 右肩：顶边(宽) → 侧壁(窄)，水平进、垂直出的外扩弧线
-        p.addCurve(to: CGPoint(x: w - f, y: f),
-                   control1: CGPoint(x: w - k * f, y: 0),
-                   control2: CGPoint(x: w - f, y: f - k * f))
-        p.addLine(to: CGPoint(x: w - f, y: h - b))
-        p.addQuadCurve(to: CGPoint(x: w - f - b, y: h), control: CGPoint(x: w - f, y: h))   // 右下圆角
-        p.addLine(to: CGPoint(x: f + b, y: h))
-        p.addQuadCurve(to: CGPoint(x: f, y: h - b), control: CGPoint(x: f, y: h))           // 左下圆角
-        p.addLine(to: CGPoint(x: f, y: f))
-        // 左肩（镜像）
-        p.addCurve(to: CGPoint(x: 0, y: 0),
-                   control1: CGPoint(x: f, y: f - k * f),
-                   control2: CGPoint(x: k * f, y: 0))
-        p.closeSubpath()
-        return p
-    }
-}
-
 enum IslandMode {
     case pill, dashboard, reminder
 }
@@ -65,20 +29,31 @@ class IslandModel: ObservableObject {
     @Published var line3 = ""
 
     var onAcknowledge: (() -> Void)?
+    var onIgnored: (() -> Void)?
     var onTapPill: () -> Void = {}
     var onDismissReminder: () -> Void = {}
+
+    // 提醒级别：0 = 普通；≥1 = 升级（上次被忽略，更大且必须手动关闭）
+    var reminderLevel = 0
 
     // 刘海下沿深度（胶囊高度与刘海齐平，不往下凸）
     var notchDepth: CGFloat = 38
 
+    // 可调外观（设置里拉动条实时预览）
+    @Published var pillWidth: CGFloat = 320        // 胶囊宽度
+    @Published var expandedHeight: CGFloat = 122   // 展开看板内容高度
+    @Published var earPadding: CGFloat = 20        // 耳朵内容离左右边缘距离
+
     var size: NSSize {
         switch mode {
-        case .pill:      return NSSize(width: 320, height: notchDepth)
-        case .dashboard: return NSSize(width: 380, height: notchDepth + 122)
-        case .reminder:  return NSSize(width: 420, height: notchDepth + 96)
+        case .pill:      return NSSize(width: pillWidth, height: notchDepth)
+        case .dashboard: return NSSize(width: pillWidth + 60, height: notchDepth + expandedHeight)
+        case .reminder:
+            return reminderLevel == 0
+                ? NSSize(width: pillWidth + 100, height: notchDepth + 96)
+                : NSSize(width: pillWidth + 180, height: notchDepth + 118)
         }
     }
-    var topFillet: CGFloat { mode == .pill ? 10 : 14 }
     var bottomRadius: CGFloat { mode == .pill ? 13 : 20 }
 }
 
@@ -92,11 +67,9 @@ struct IslandView: View {
     @ObservedObject var model: IslandModel
 
     var body: some View {
-        // 背景形状铺满整个窗口（动画时窗口拉伸，形状随之铺满，不会出现空洞）；
-        // 内容贴底部（刘海下沿以下），窗口生长时内容随下边缘移动
+        // 黑色背景与圆角由窗口图层负责（动画期间也始终铺满、不闪烁）；
+        // 这里只放内容，贴底部（刘海下沿以下），随窗口下边缘移动
         ZStack(alignment: .bottom) {
-            NotchCapsuleShape(topFillet: model.topFillet, bottomRadius: model.bottomRadius)
-                .fill(Color.black)
             Group {
                 switch model.mode {
                 case .pill:      pillContent.transition(.opacity)
@@ -105,7 +78,7 @@ struct IslandView: View {
                 }
             }
         }
-        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 3)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // 胶囊：左耳图标 + 右耳分钟数（中间被物理刘海挡住，正好空着）
@@ -121,7 +94,7 @@ struct IslandView: View {
                     .foregroundStyle(.white)
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, model.earPadding)
         .frame(maxWidth: .infinity)
         .frame(height: model.notchDepth)
         .contentShape(Rectangle())
@@ -150,7 +123,7 @@ struct IslandView: View {
         .padding(.horizontal, 20)
         .padding(.top, 6)
         .padding(.bottom, 14)
-        .frame(height: 122)
+        .frame(height: model.expandedHeight)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture { model.onTapPill() }   // 再点一下收起
@@ -231,10 +204,15 @@ class NotchIslandController {
                             styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered,
                             defer: false)
-        // NSHostingView + 显式 frame：NSHostingController 会按内容理想尺寸重设窗口，导致塌缩
         // 关键：hosting 钉在容器【顶部】（minYMargin 弹性底边）。
-        // 展开时窗口向下生长，顶部逐渐被揭示，绝不留透明空洞
+        // 黑色背景 + 底部圆角直接画在容器 CALayer 上——图层随窗口动画同步拉伸，
+        // 不走 SwiftUI 渲染管线，展开/收起期间顶部始终实心黑色，不闪不露底
         let container = NSView(frame: NSRect(origin: .zero, size: size))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.black.cgColor
+        container.layer?.cornerRadius = model.bottomRadius
+        container.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]  // 仅底部两角
+        container.layer?.masksToBounds = true
         let hosting = IslandHostingView(rootView: IslandView(model: model))
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.autoresizingMask = [.width, .minYMargin]   // 宽度跟随，顶部钉住
@@ -243,7 +221,7 @@ class NotchIslandController {
         panel.contentView = container
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false   // 阴影由 SwiftUI 侧绘制，避免方角阴影穿帮
+        panel.hasShadow = false
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         panel.isReleasedWhenClosed = false
@@ -287,23 +265,41 @@ class NotchIslandController {
         }
     }
 
-    // 形态切换：内容立即就位（形状圆角与淡入淡出短过渡），窗口弹簧伸缩做主体动画
+    // 形态切换：内容立即就位（淡入淡出短过渡），窗口弹簧伸缩做主体动画
     private func setMode(_ mode: IslandMode, animated: Bool = true) {
         if animated {
             withAnimation(.easeOut(duration: 0.15)) { model.mode = mode }
         } else {
             model.mode = mode
         }
+        // 底部圆角跟随形态（窗口图层，平滑过渡）
+        if let layer = panel?.contentView?.layer {
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(animated ? 0.5 : 0)
+            layer.cornerRadius = model.bottomRadius
+            CATransaction.commit()
+        }
         reposition(animated: animated)
     }
 
     // MARK: 每 5 秒喂一次状态
+
+    // 外观实时预览：滑条拖动时立即改变尺寸（弹簧动画过渡）
+    func applyAppearance(width: CGFloat, expandedHeight: CGFloat, earPadding: CGFloat) {
+        let sizeChanged = width != model.pillWidth || expandedHeight != model.expandedHeight
+        model.pillWidth = width
+        model.expandedHeight = expandedHeight
+        model.earPadding = earPadding
+        if sizeChanged, panel != nil { reposition(animated: true) }
+    }
 
     func update(icon: String, text: String, tint: Color,
                 line1: String, line2: String, line3: String) {
         model.pillIcon = icon
         model.pillText = text
         model.pillTint = tint
+        // 提醒展开期间不覆盖内容，否则提醒文案会被看板数据冲掉
+        guard model.mode != .reminder else { return }
         model.bigIcon = icon
         model.line1 = line1
         model.line2 = line2
@@ -337,22 +333,46 @@ class NotchIslandController {
 
     // MARK: 提醒
 
-    func showReminder(icon: String, title: String, message: String,
-                      onAcknowledge: @escaping () -> Void) {
+    // level 0 = 普通提醒（25 秒自动收起）；level ≥1 = 升级提醒（更大、必须手动点掉）
+    func showReminder(icon: String, title: String, message: String, level: Int = 0,
+                      onAcknowledge: @escaping () -> Void, onIgnored: (() -> Void)? = nil) {
         ensurePanel()
         collapseWork?.cancel()
         reminderWork?.cancel()
         model.bigIcon = icon
         model.line1 = title
         model.line2 = message
+        model.reminderLevel = level
         model.onAcknowledge = onAcknowledge
+        model.onIgnored = onIgnored
         panel?.orderFrontRegardless()
         setMode(.reminder)
 
-        // 25 秒未确认自动收起（不算确认，重复提醒逻辑照常）
+        if level == 0 {
+            // 25 秒未确认自动收起（不算确认，触发升级逻辑）
+            let work = DispatchWorkItem { [weak self] in self?.collapseFromReminder(ack: false) }
+            reminderWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 25, execute: work)
+        }
+    }
+
+    // 休息打卡 / 周报：短暂展开的卡片，默认 4 秒自动收起
+    func showCelebration(title: String, message: String, duration: TimeInterval = 4) {
+        ensurePanel()
+        collapseWork?.cancel()
+        reminderWork?.cancel()
+        model.bigIcon = "checkmark.circle.fill"
+        model.line1 = title
+        model.line2 = message
+        model.reminderLevel = 0
+        model.onAcknowledge = nil
+        model.onIgnored = nil
+        panel?.orderFrontRegardless()
+        setMode(.reminder)
+
         let work = DispatchWorkItem { [weak self] in self?.collapseFromReminder(ack: false) }
         reminderWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 25, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
     }
 
     func dismissReminder() { collapseFromReminder(ack: true) }
@@ -360,8 +380,10 @@ class NotchIslandController {
     private func collapseFromReminder(ack: Bool) {
         guard model.mode == .reminder else { return }
         reminderWork?.cancel()
-        if ack { model.onAcknowledge?() }
+        if ack { model.onAcknowledge?() } else { model.onIgnored?() }
         model.onAcknowledge = nil
+        model.onIgnored = nil
+        model.reminderLevel = 0
         setMode(.pill)
         if !islandEnabled { panel?.close() }
     }
