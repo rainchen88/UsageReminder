@@ -46,7 +46,7 @@ Left-click the island for a quick dashboard · right-click for settings.
 
 ## 📦 Install
 
-1. Download `久坐提醒.dmg` from [Releases](https://github.com/rainchen88/UsageReminder/releases)
+1. Download `UsageReminder-x.x.x.dmg` from [Releases](https://github.com/rainchen88/UsageReminder/releases)
 2. Open the DMG and drag `久坐提醒.app` onto the `Applications` folder
 3. First launch: **right-click → Open** (the app is not notarized yet)
 4. Requires **macOS 14+**

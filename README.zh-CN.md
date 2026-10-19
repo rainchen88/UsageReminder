@@ -37,7 +37,7 @@
 
 ## 📦 安装
 
-1. 从 [Releases](https://github.com/rainchen88/UsageReminder/releases) 下载 `久坐提醒.dmg`
+1. 从 [Releases](https://github.com/rainchen88/UsageReminder/releases) 下载 `UsageReminder-x.x.x.dmg`
 2. 打开 DMG，把 `久坐提醒.app` 拖到「Applications」文件夹
 3. 首次打开：**右键 → 打开**（未公证，只需这一次）
 4. 要求 **macOS 14 或以上**
